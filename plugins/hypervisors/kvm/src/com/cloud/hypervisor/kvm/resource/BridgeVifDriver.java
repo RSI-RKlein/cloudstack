@@ -192,11 +192,12 @@ public class BridgeVifDriver extends VifDriverBase {
         } else {
             brName = setVnetBrName(nic, vNetId);
         }
-        createVnet(vNetId, nic, brName, protocol);
+        // pifKey is traffic label
+        createVnet(vNetId, nic, brName, protocol, pifKey);
         return brName;
     }
 
-    private void createVnet(String vnetId, String pif, String brName, String protocol) throws InternalErrorException {
+    private void createVnet(String vnetId, String pif, String brName, String protocol, String trafficlabel) throws InternalErrorException {
         synchronized (_vnetBridgeMonitor) {
             String script = _modifyVlanPath;
             if (protocol.equals(Networks.BroadcastDomainType.Vxlan.scheme())) {
@@ -206,8 +207,10 @@ public class BridgeVifDriver extends VifDriverBase {
             command.add("-v", vnetId);
             command.add("-p", pif);
             command.add("-b", brName);
+            if (protocol.equals(Networks.BroadcastDomainType.Vxlan.scheme())) {
+            	command.add("-l", trafficlabel);
+            }
             command.add("-o", "add");
-
             final String result = command.execute();
             if (result != null) {
                 throw new InternalErrorException("Failed to create vnet " + vnetId + ": " + result);

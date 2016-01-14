@@ -22,7 +22,7 @@
 ## TODO(VXLAN): MTU, IPv6 underlying
 
 usage() {
-  printf "Usage: %s: -o <op>(add | delete) -v <vxlan id> -p <pif> -b <bridge name>\n" 
+  printf "Usage: %s: -o <op>(add | delete) -v <vxlan id> -p <pif> -b <bridge name> -l <traffic label>\n" 
 }
 
 addVxlan() {
@@ -30,12 +30,17 @@ addVxlan() {
 	local pif=$2
 	local vxlanDev=vxlan$vxlanId
 	local vxlanBr=$3
+	local brif="$4"
 	local mcastGrp="239.$(( ($vxlanId >> 16) % 256 )).$(( ($vxlanId >> 8) % 256 )).$(( $vxlanId % 256 ))"
 	
-	## TODO(VXLAN): $brif (trafficlabel) should be passed from caller because we cannot assume 1:1 mapping between pif and brif.
-	# lookup bridge interface 
-	local sysfs_dir=/sys/devices/virtual/net/
-	local brif=`find ${sysfs_dir}*/brif/ -name $pif | sed -e "s,$sysfs_dir,," | sed -e 's,/brif/.*$,,'`
+	# if brif is empty use original logic
+	if [ -z "$brif" ]
+	then
+    	## TODO(VXLAN): $brif (trafficlabel) should be passed from caller because we cannot assume 1:1 mapping between pif and brif.
+		# lookup bridge interface
+		local sysfs_dir=/sys/devices/virtual/net/
+		brif=`find ${sysfs_dir}*/brif/ -name $pif | sed -e "s,$sysfs_dir,," | sed -e 's,/brif/.*$,,'`
+	fi 
 	
 	if [ "$brif " == " " ]
 	then
@@ -139,10 +144,15 @@ deleteVxlan() {
 	local pif=$2
 	local vxlanDev=vxlan$vxlanId
 	local vxlanBr=$3
+	local brif="$4"
 	local mcastGrp="239.$(( ($vxlanId >> 16) % 256 )).$(( ($vxlanId >> 8) % 256 )).$(( $vxlanId % 256 ))"
 	
-	local sysfs_dir=/sys/devices/virtual/net/
-	local brif=`find ${sysfs_dir}*/brif/ -name $pif | sed -e "s,$sysfs_dir,," | sed -e 's,/brif/.*$,,'`
+	# if brif is empty use original logic
+	if [ -z "$brif" ]
+	then
+		local sysfs_dir=/sys/devices/virtual/net/
+		brif=`find ${sysfs_dir}*/brif/ -name $pif | sed -e "s,$sysfs_dir,," | sed -e 's,/brif/.*$,,'`
+	fi 
 	
 	ip route del $mcastGrp/32 dev $brif
 	
@@ -174,9 +184,10 @@ deleteVxlan() {
 
 op=
 vxlanId=
+tlName=
 option=$@
 
-while getopts 'o:v:p:b:' OPTION
+while getopts 'o:v:p:b:l:' OPTION
 do
   case $OPTION in
   o)	oflag=1
@@ -190,6 +201,9 @@ do
 		;;
   b)	bflag=1
 		brName="$OPTARG"
+		;;
+  l)	lflag=1
+		tlName="$OPTARG"
 		;;
   ?)	usage
 		exit 2
@@ -219,7 +233,7 @@ fi
 if [ "$op" == "add" ]
 then
 	# Add the vxlan
-	addVxlan $vxlanId $pif $brName
+	addVxlan $vxlanId $pif $brName $tlName
 	
 	# If the add fails then return failure
 	if [ $? -gt 0 ]
@@ -230,10 +244,9 @@ else
 	if [ "$op" == "delete" ]
 	then
 		# Delete the vxlan
-		deleteVxlan $vxlanId $pif $brName
+		deleteVxlan $vxlanId $pif $brName $tlName
 		
 		# Always exit with success
 		exit 0
 	fi
 fi
-
