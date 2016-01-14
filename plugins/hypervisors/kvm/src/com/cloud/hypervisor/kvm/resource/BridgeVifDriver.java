@@ -208,7 +208,7 @@ public class BridgeVifDriver extends VifDriverBase {
             command.add("-p", pif);
             command.add("-b", brName);
             if (protocol.equals(Networks.BroadcastDomainType.Vxlan.scheme())) {
-            	command.add("-l", trafficlabel);
+                command.add("-l", trafficlabel);
             }
             command.add("-o", "add");
             final String result = command.execute();
