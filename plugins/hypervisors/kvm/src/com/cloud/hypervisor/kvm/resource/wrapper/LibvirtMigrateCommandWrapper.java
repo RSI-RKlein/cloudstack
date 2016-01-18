@@ -98,6 +98,7 @@ public final class LibvirtMigrateCommandWrapper extends CommandWrapper<MigrateCo
 
             //run migration in thread so we can monitor it
             s_logger.info("Live migration of instance " + vmName + " initiated");
+            s_logger.debug("xmlDesc for " + vmName + ": " + xmlDesc);
             final ExecutorService executor = Executors.newFixedThreadPool(1);
             final Callable<Domain> worker = new MigrateKVMAsync(libvirtComputingResource, dm, dconn, xmlDesc, vmName, command.getDestinationIp());
             final Future<Domain> migrateThread = executor.submit(worker);

@@ -15,7 +15,7 @@
   <parent>
     <groupId>org.apache.cloudstack</groupId>
     <artifactId>cloudstack-framework</artifactId>
-    <version>4.7.0.RSI20160114</version>
+    <version>4.7.0.RSI20160118</version>
     <relativePath>../pom.xml</relativePath>
   </parent>
   <dependencies>
