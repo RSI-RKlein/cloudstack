@@ -174,7 +174,7 @@ public class BridgeVifDriver extends VifDriverBase {
     }
 
     private String setVxnetBrName(String pifName, String vnetId) {
-        return "brvx-" + vnetId;
+        return "vxbr-" + vnetId;
     }
 
     private String createVnetBr(String vNetId, String pifKey, String protocol) throws InternalErrorException {

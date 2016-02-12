@@ -234,12 +234,12 @@ class serviceOpsRedhat7(serviceOps):
         bash("systemctl disable " + servicename)
         return result
 
-    def startService(self, servicename,force=False):
+    def startService(self, servicename,force=True):
         if not self.isServiceRunning(servicename) or force:
             return bash("systemctl start " + servicename).isSuccess()
         return True
 
-    def enableService(self, servicename,forcestart=False):
+    def enableService(self, servicename,forcestart=True):
         bash("systemctl enable " + servicename)
         return self.startService(servicename,force=forcestart)
 
