@@ -53,6 +53,14 @@ class CsPassword(CsDataBag):
             if item == "id":
                 continue
             self.__update(item, self.dbag[item])
+            logging.debug(self.dbag)
+            logging.debug("Deleting IP from dbag")
+            del self.dbag[item]
+            logging.debug(self.dbag)
+            sv = True
+        if sv:
+            logging.debug("Saving dbag")
+            self.save()
 
     def __update(self, vm_ip, password):
         token = ""
