@@ -49,19 +49,19 @@ class CsPassword(CsDataBag):
     TOKEN_FILE="/tmp/passwdsrvrtoken"
     
     def process(self):
+        sv = False
         for item in self.dbag:
             if item == "id":
                 continue
             self.__update(item, self.dbag[item])
-            logging.depub("Testing from CsPassword.process.")
-#            logging.debug(self.dbag)
-#            logging.debug("Deleting IP from dbag")
-#            del self.dbag[item]
-#            logging.debug(self.dbag)
-#            sv = True
-#        if sv:
-#            logging.debug("Saving dbag")
-#            self.save()
+            logging.debug(self.dbag)
+            logging.debug("Deleting IP from dbag")
+            del self.dbag[item]
+            logging.debug(self.dbag)
+            sv = True
+        if sv:
+            logging.debug("Saving dbag")
+            self.save()
 
     def __update(self, vm_ip, password):
         token = ""
