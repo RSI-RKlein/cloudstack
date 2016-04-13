@@ -50,7 +50,7 @@ class CsPassword(CsDataBag):
     
     def process(self):
         sv = False
-        for item in self.dbag:
+        for item in list(self.dbag):
             if item == "id":
                 continue
             self.__update(item, self.dbag[item])
