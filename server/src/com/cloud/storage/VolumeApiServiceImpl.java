@@ -745,6 +745,8 @@ public class VolumeApiServiceImpl extends ManagerBase implements VolumeApiServic
         boolean created = true;
 
         try {
+            // Always recalculate primary storage before starting
+            _resourceLimitMgr.recalculateResourceCount(volume.getAccountId(), volume.getDomainId(), ResourceType.primary_storage.getOrdinal());
             if (cmd.getSnapshotId() != null) {
                 volume = createVolumeFromSnapshot(volume, cmd.getSnapshotId(), cmd.getVirtualMachineId());
                 if (volume.getState() != Volume.State.Ready) {
@@ -1232,6 +1234,8 @@ public class VolumeApiServiceImpl extends ManagerBase implements VolumeApiServic
             if (volume.getState() == Volume.State.Allocated) {
                 _volsDao.remove(volumeId);
                 stateTransitTo(volume, Volume.Event.DestroyRequested);
+                // Recalculate when deleting
+                _resourceLimitMgr.recalculateResourceCount(volume.getAccountId(), volume.getDomainId(), ResourceType.primary_storage.getOrdinal());
                 return true;
             }
             // expunge volume from primary if volume is on primary
@@ -1448,9 +1452,9 @@ public class VolumeApiServiceImpl extends ManagerBase implements VolumeApiServic
         }
 
         Account owner = _accountDao.findById(volumeToAttach.getAccountId());
-
         try {
-            _resourceLimitMgr.checkResourceLimit(owner, ResourceType.primary_storage, volumeToAttach.getSize());
+            // Changed to pass 0 to avoid doubling issue when a volume is created then attached.
+            _resourceLimitMgr.checkResourceLimit(owner, ResourceType.primary_storage, 0);
         } catch (ResourceAllocationException e) {
             s_logger.error("primary storage resource limit check failed", e);
             throw new InvalidParameterValueException(e.getMessage());
