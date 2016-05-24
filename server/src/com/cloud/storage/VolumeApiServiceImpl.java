@@ -745,8 +745,8 @@ public class VolumeApiServiceImpl extends ManagerBase implements VolumeApiServic
         boolean created = true;
 
         try {
-            // Always recalculate primary storage before starting
-            _resourceLimitMgr.recalculateResourceCount(volume.getAccountId(), volume.getDomainId(), ResourceType.primary_storage.getOrdinal());
+            // Always recalculate primary storage for domain before starting
+            _resourceLimitMgr.recalculateResourceCount(null, volume.getDomainId(), ResourceType.primary_storage.getOrdinal());
             if (cmd.getSnapshotId() != null) {
                 volume = createVolumeFromSnapshot(volume, cmd.getSnapshotId(), cmd.getVirtualMachineId());
                 if (volume.getState() != Volume.State.Ready) {

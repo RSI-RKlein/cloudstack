@@ -760,18 +760,21 @@ public class ResourceLimitManagerImpl extends ManagerBase implements ResourceLim
         }
 
         for (ResourceType type : resourceTypes) {
-            if (accountId != null) {
-                if (type.supportsOwner(ResourceOwnerType.Account)) {
-                    count = recalculateAccountResourceCount(accountId, type);
-                    counts.add(new ResourceCountVO(type, count, accountId, ResourceOwnerType.Account));
-                }
-
-            } else {
-                if (type.supportsOwner(ResourceOwnerType.Domain)) {
-                    count = recalculateDomainResourceCount(domainId, type);
-                    counts.add(new ResourceCountVO(type, count, domainId, ResourceOwnerType.Domain));
-                }
-            }
+          // Recalculate domain which also recalculates account.
+          count = recalculateDomainResourceCount(domainId, type);
+          counts.add(new ResourceCountVO(type, count, domainId, ResourceOwnerType.Domain));
+//            if (accountId != null) {
+//                if (type.supportsOwner(ResourceOwnerType.Account)) {
+//                    count = recalculateAccountResourceCount(accountId, type);
+//                    counts.add(new ResourceCountVO(type, count, accountId, ResourceOwnerType.Account));
+//                }
+//
+//            } else {
+//                if (type.supportsOwner(ResourceOwnerType.Domain)) {
+//                    count = recalculateDomainResourceCount(domainId, type);
+//                    counts.add(new ResourceCountVO(type, count, domainId, ResourceOwnerType.Domain));
+//                }
+//            }
         }
 
         return counts;
