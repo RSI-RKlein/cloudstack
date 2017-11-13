@@ -1146,6 +1146,82 @@
                                             number: true
                                         }
                                     },
+                                    qosType: {
+                                        label: 'label.qos.type',
+                                        docID: 'helpDiskOfferingQoSType',
+                                        select: function(args) {
+                                            var items = [];
+                                            items.push({
+                                                id: '',
+                                                description: ''
+                                            });
+                                            items.push({
+                                                id: 'hypervisor',
+                                                description: 'hypervisor'
+                                            });
+                                            items.push({
+                                                id: 'storage',
+                                                description: 'storage'
+                                            });
+                                            args.response.success({
+                                                data: items
+                                            });
+
+                                            args.$select.change(function() {
+                                                var $form = $(this).closest('form');
+                                                var $isCustomizedIops = $form.find('.form-item[rel=isCustomizedIops]');
+                                                var $minIops = $form.find('.form-item[rel=minIops]');
+                                                var $maxIops = $form.find('.form-item[rel=maxIops]');
+                                                var $diskBytesReadRate = $form.find('.form-item[rel=diskBytesReadRate]');
+                                                var $diskBytesWriteRate = $form.find('.form-item[rel=diskBytesWriteRate]');
+                                                var $diskIopsReadRate = $form.find('.form-item[rel=diskIopsReadRate]');
+                                                var $diskIopsWriteRate = $form.find('.form-item[rel=diskIopsWriteRate]');
+
+                                                var qosId = $(this).val();
+
+                                                if (qosId == 'storage') { // Storage QoS
+                                                    $diskBytesReadRate.hide();
+                                                    $diskBytesWriteRate.hide();
+                                                    $diskIopsReadRate.hide();
+                                                    $diskIopsWriteRate.hide();
+
+                                                    $minIops.css('display', 'inline-block');
+                                                    $maxIops.css('display', 'inline-block');
+                                                } else if (qosId == 'hypervisor') { // Hypervisor Qos
+                                                    $minIops.hide();
+                                                    $maxIops.hide();
+
+                                                    $diskBytesReadRate.css('display', 'inline-block');
+                                                    $diskBytesWriteRate.css('display', 'inline-block');
+                                                    $diskIopsReadRate.css('display', 'inline-block');
+                                                    $diskIopsWriteRate.css('display', 'inline-block');
+                                                } else { // No Qos
+                                                    $diskBytesReadRate.hide();
+                                                    $diskBytesWriteRate.hide();
+                                                    $diskIopsReadRate.hide();
+                                                    $diskIopsWriteRate.hide();
+                                                    $minIops.hide();
+                                                    $maxIops.hide();
+                                                }
+                                            });
+                                        }
+                                    },
+                                    minIops: {
+                                        label: 'label.disk.iops.min',
+                                        docID: 'helpDiskOfferingDiskIopsMin',
+                                        validation: {
+                                            required: false,
+                                            number: true
+                                        }
+                                    },
+                                    maxIops: {
+                                        label: 'label.disk.iops.max',
+                                        docID: 'helpDiskOfferingDiskIopsMax',
+                                        validation: {
+                                            required: false,
+                                            number: true
+                                        }
+                                    },
                                     diskBytesReadRate: {
                                         label: 'label.disk.bytes.read.rate',
                                         docID: 'helpSystemOfferingDiskBytesReadRate',
@@ -1211,7 +1287,11 @@
                                         dependsOn: 'isPublic',
                                         select: function(args) {
                                             $.ajax({
-                                                url: createURL("listDomains&listAll=true"),
+                                                url: createURL('listDomains'),
+                                                data: {
+                                                    listAll: true,
+                                                    details: 'min'
+                                                },
                                                 dataType: "json",
                                                 async: false,
                                                 success: function(json) {
@@ -1255,25 +1335,43 @@
                                         networkrate: args.data.networkRate
                                     });
                                 }
-                                if (args.data.diskBytesReadRate != null && args.data.diskBytesReadRate.length > 0) {
-                                    $.extend(data, {
-                                        bytesreadrate: args.data.diskBytesReadRate
-                                    });
-                                }
-                                if (args.data.diskBytesWriteRate != null && args.data.diskBytesWriteRate.length > 0) {
-                                    $.extend(data, {
-                                        byteswriterate: args.data.diskBytesWriteRate
-                                    });
-                                }
-                                if (args.data.diskIopsReadRate != null && args.data.diskIopsReadRate.length > 0) {
-                                    $.extend(data, {
-                                        iopsreadrate: args.data.diskIopsReadRate
-                                    });
-                                }
-                                if (args.data.diskIopsWriteRate != null && args.data.diskIopsWriteRate.length > 0) {
-                                    $.extend(data, {
-                                        iopswriterate: args.data.diskIopsWriteRate
-                                    });
+
+                                if (args.data.qosType == 'storage') {
+                                    if (args.data.minIops != null && args.data.minIops.length > 0) {
+                                        $.extend(data, {
+                                            miniops: args.data.minIops
+                                        });
+                                    }
+
+                                    if (args.data.maxIops != null && args.data.maxIops.length > 0) {
+                                        $.extend(data, {
+                                            maxiops: args.data.maxIops
+                                        });
+                                    }
+                                } else if (args.data.qosType == 'hypervisor') {
+                                    if (args.data.diskBytesReadRate != null && args.data.diskBytesReadRate.length > 0) {
+                                        $.extend(data, {
+                                            bytesreadrate: args.data.diskBytesReadRate
+                                        });
+                                    }
+
+                                    if (args.data.diskBytesWriteRate != null && args.data.diskBytesWriteRate.length > 0) {
+                                        $.extend(data, {
+                                            byteswriterate: args.data.diskBytesWriteRate
+                                        });
+                                    }
+
+                                    if (args.data.diskIopsReadRate != null && args.data.diskIopsReadRate.length > 0) {
+                                        $.extend(data, {
+                                            iopsreadrate: args.data.diskIopsReadRate
+                                        });
+                                    }
+
+                                    if (args.data.diskIopsWriteRate != null && args.data.diskIopsWriteRate.length > 0) {
+                                        $.extend(data, {
+                                            iopswriterate: args.data.diskIopsWriteRate
+                                        });
+                                    }
                                 }
 
                                 $.extend(data, {
@@ -1475,6 +1573,24 @@
                                     },
                                     networkrate: {
                                         label: 'label.network.rate'
+                                    },
+                                    miniops: {
+                                        label: 'label.disk.iops.min',
+                                        converter: function(args) {
+                                            if (args > 0)
+                                                return args;
+                                            else
+                                                return "N/A";
+                                        }
+                                    },
+                                    maxiops: {
+                                        label: 'label.disk.iops.max',
+                                        converter: function(args) {
+                                            if (args > 0)
+                                                return args;
+                                            else
+                                                return "N/A";
+                                        }
                                     },
                                     diskBytesReadRate: {
                                         label: 'label.disk.bytes.read.rate'
@@ -1887,7 +2003,11 @@
                                         dependsOn: 'isPublic',
                                         select: function(args) {
                                             $.ajax({
-                                                url: createURL("listDomains&listAll=true"),
+                                                url: createURL('listDomains'),
+                                                data: {
+                                                    listAll: true,
+                                                    details: 'min'
+                                                },
                                                 dataType: "json",
                                                 async: false,
                                                 success: function(json) {
@@ -2255,6 +2375,7 @@
                                     var $serviceofferingid = args.$form.find('.form-item[rel=serviceofferingid]');
                                     var $conservemode = args.$form.find('.form-item[rel=conservemode]');
                                     var $supportsstrechedl2subnet = args.$form.find('.form-item[rel=supportsstrechedl2subnet]');
+                                    var $supportspublicaccess = args.$form.find('.form-item[rel=supportspublicaccess]');
                                     var $serviceSourceNatRedundantRouterCapabilityCheckbox = args.$form.find('.form-item[rel="service.SourceNat.redundantRouterCapabilityCheckbox"]');
                                     var hasAdvancedZones = false;
 
@@ -2526,11 +2647,17 @@
                                             args.$form.find('.form-item[rel=\"egressdefaultpolicy\"]').css('display', 'none');
                                         }
 
-                                        //show LB Isolation dropdown only when (1)LB Service is checked (2)Service Provider is Netscaler OR F5
-                                        if ((args.$form.find('.form-item[rel=\"service.Lb.isEnabled\"]').find('input[type=checkbox]').is(':checked') == true) && (args.$form.find('.form-item[rel=\"service.Lb.provider\"]').find('select').val() == 'Netscaler' || args.$form.find('.form-item[rel=\"service.Lb.provider\"]').find('select').val() == 'F5BigIp')) {
-                                            args.$form.find('.form-item[rel=\"service.Lb.lbIsolationDropdown\"]').css('display', 'inline-block');
+                                        //show Netscaler service packages only when (1)LB Service is checked (2)Service Provider is Netscaler
+                                        if ((args.$form.find('.form-item[rel=\"service.Lb.isEnabled\"]').find('input[type=checkbox]').is(':checked') == true) && (args.$form.find('.form-item[rel=\"service.Lb.provider\"]').find('select').val() == 'Netscaler')) {
+                                            args.$form.find('.form-item[rel=\"service.Lb.Netscaler.servicePackages\"]').css('display', 'inline-block');
+                                            args.$form.find('.form-item[rel=\"service.Lb.Netscaler.servicePackages.description\"]').css('display', 'inline-block');
+                                            args.$form.find('.form-item[rel=\"service.Lb.Netscaler.servicePackages.description\"]').find("#label_netscaler_service_packages_description").attr("disabled", "disabled");
+                                            args.$form.find('.form-item[rel=\"service.Lb.Netscaler.servicePackages.description\"]').find("#label_netscaler_service_packages_description").text(args.$form.find('.form-item[rel=\"service.Lb.Netscaler.servicePackages\"]').find('#label_netscaler_service_packages option:selected').data("json-obj").desc);
                                         } else {
-                                            args.$form.find('.form-item[rel=\"service.Lb.lbIsolationDropdown\"]').hide();
+                                            args.$form.find('.form-item[rel=\"service.Lb.Netscaler.servicePackages\"]').hide();
+                                            args.$form.find('.form-item[rel=\"service.Lb.Netscaler.servicePackages.description\"]').hide();
+                                            args.$form.find('.form-item[rel=\"service.Lb.Netscaler.servicePackages.description\"]').find("#label_netscaler_service_packages_description").attr("disabled", "disabled");
+                                            args.$form.find('.form-item[rel=\"service.Lb.Netscaler.servicePackages.description\"]').find("#label_netscaler_service_packages_description").text("");
                                         }
 
                                         //show Elastic LB checkbox only when (1)LB Service is checked (2)Service Provider is Netscaler (3)Guest IP Type is Shared
@@ -2562,6 +2689,20 @@
                                             $supportsstrechedl2subnet.css('display', 'inline-block');
                                         } else {
                                             $supportsstrechedl2subnet.hide();
+                                        }
+
+                                        //PublicAccess checkbox should be displayed only when 'Connectivity' service is checked
+                                        if (args.$form.find('.form-item[rel=\"service.Connectivity.isEnabled\"]').find('input[type=checkbox]').is(':checked') && $guestTypeField.val() == 'Shared' &&
+                                            args.$form.find('.form-item[rel=\"service.Connectivity.provider\"]').find('select').val() == 'NuageVsp') {
+                                            $supportspublicaccess.css('display', 'inline-block');
+                                        } else {
+                                            $supportspublicaccess.hide();
+                                        }
+
+                                        //Uncheck specifyVlan checkbox when (1)guest type is Shared and (2)NuageVsp is selected as a Connectivity provider
+                                        if ($guestTypeField.val() == 'Shared') {
+                                            var $specifyVlanCheckbox = args.$form.find('.form-item[rel=specifyVlan]').find('input[type=checkbox]');
+                                            $specifyVlanCheckbox.attr('checked', args.$form.find('.form-item[rel=\"service.Connectivity.provider\"]').find('select').val() != 'NuageVsp')
                                         }
                                     });
 
@@ -2665,6 +2806,60 @@
                                                 }, {
                                                     id: 'internalLb',
                                                     description: 'Internal LB'
+                                                }]
+                                            });
+                                        }
+                                    },
+
+                                    promiscuousMode: {
+                                        label: 'label.promiscuous.mode',
+                                        select: function(args) {
+                                            args.response.success({
+                                                data: [{
+                                                    id: '',
+                                                    description: ''
+                                                }, {
+                                                    id: 'true',
+                                                    description: 'Accept'
+                                                }, {
+                                                    id: 'false',
+                                                    description: 'Reject'
+                                                }]
+                                            });
+                                        }
+                                    },
+
+                                    macAddressChanges: {
+                                        label: 'label.mac.address.changes',
+                                        select: function(args) {
+                                            args.response.success({
+                                                data: [{
+                                                    id: '',
+                                                    description: ''
+                                                }, {
+                                                    id: 'true',
+                                                    description: 'Accept'
+                                                }, {
+                                                    id: 'false',
+                                                    description: 'Reject'
+                                                }]
+                                            });
+                                        }
+                                    },
+
+                                    forgedTransmits: {
+                                        label: 'label.forged.transmits',
+                                        select: function(args) {
+                                            args.response.success({
+                                                data: [{
+                                                    id: '',
+                                                    description: ''
+                                                }, {
+                                                    id: 'true',
+                                                    description: 'Accept'
+                                                }, {
+                                                    id: 'false',
+                                                    description: 'Reject'
                                                 }]
                                             });
                                         }
@@ -2887,22 +3082,7 @@
                                         isHidden: true,
                                         isBoolean: true
                                     },
-                                    "service.Lb.lbIsolationDropdown": {
-                                        label: 'label.LB.isolation',
-                                        docID: 'helpNetworkOfferingLBIsolation',
-                                        isHidden: true,
-                                        select: function(args) {
-                                            args.response.success({
-                                                data: [{
-                                                    id: 'dedicated',
-                                                    description: 'Dedicated'
-                                                }, {
-                                                    id: 'shared',
-                                                    description: 'Shared'
-                                                }]
-                                            })
-                                        }
-                                    },
+
                                     "service.Lb.inlineModeDropdown": {
                                         label: 'label.mode',
                                         docID: 'helpNetworkOfferingMode',
@@ -2922,6 +3102,62 @@
                                         }
                                     },
 
+                                    "service.Lb.Netscaler.servicePackages": {
+                                        label: 'label.netscaler.service.packages',
+                                        docID: 'helpNetscalerServicePackages',
+                                        isHidden: true,
+                                        select: function(args) {
+                                            $.ajax({
+                                                url: createURL('listRegisteredServicePackages'),
+                                                dataType: 'json',
+                                                async: true,
+                                                success: function(data) {
+                                                    var servicePackages = data.listregisteredservicepackage.registeredServicepackage;
+
+                                                    if (servicePackages == undefined || servicePackages == null || !servicePackages) {
+                                                        servicePackages = data.listregisteredservicepackage;
+                                                    }
+
+                                                    args.response.success({
+                                                        data:   $.map(servicePackages, function(elem) {
+                                                            return {
+                                                                id: elem.id,
+                                                                description: elem.name,
+                                                                desc: elem.description
+                                                            };
+                                                        })
+                                                    });
+                                                },
+                                                error: function(data) {
+                                                    args.response.error(parseXMLHttpResponse(data));
+                                                }
+                                            });
+                                        }
+                                    },
+
+                                    "service.Lb.Netscaler.servicePackages.description": {
+                                        label: 'label.netscaler.service.packages.description',
+                                        isHidden: true,
+                                        isTextarea: true
+                                    },
+
+                                    "service.Lb.lbIsolationDropdown": {
+                                        label: 'label.LB.isolation',
+                                        docID: 'helpNetworkOfferingLBIsolation',
+                                        isHidden: true,
+                                        select: function(args) {
+                                            args.response.success({
+                                                data: [{
+                                                    id: 'dedicated',
+                                                    description: 'Dedicated'
+                                                }, {
+                                                    id: 'shared',
+                                                    description: 'Shared'
+                                                }]
+                                            })
+                                        }
+                                    },
+
                                     "service.StaticNat.elasticIpCheckbox": {
                                         label: "label.elastic.IP",
                                         isHidden: true,
@@ -2938,6 +3174,13 @@
 
                                     supportsstrechedl2subnet: {
                                         label: 'label.supportsstrechedl2subnet',
+                                        isBoolean: true,
+                                        isChecked: false,
+                                        isHidden: true
+                                    },
+
+                                    supportspublicaccess: {
+                                        label: 'label.supportspublicaccess',
                                         isBoolean: true,
                                         isChecked: false,
                                         isHidden: true
@@ -2994,6 +3237,12 @@
 
                                 $.each(formData, function(key, value) {
                                     var serviceData = key.split('.');
+
+                                    if (key == 'service.Lb.Netscaler.servicePackages' && value != "") {
+                                       inputData['details[' + 0 + '].servicepackageuuid'] = value;
+                                       inputData['details[' + 1 + '].servicepackagedescription'] = args.$form.find('#label_netscaler_service_packages option:selected').data().jsonObj.desc;
+                                    }
+
 
                                     if (serviceData.length > 1) {
                                         if (serviceData[0] == 'service' &&
@@ -3075,18 +3324,23 @@
                                     }
                                 }
 
-                                //passing supportsstrechedl2subnet's value as capability
+                                //passing supportsstrechedl2subnet and supportspublicaccess's value as capability
                                 for (var k in inputData) {
                                     if (k == 'supportsstrechedl2subnet' && ("Connectivity" in serviceProviderMap)) {
-                                            inputData['servicecapabilitylist[' + serviceCapabilityIndex + '].service'] = 'Connectivity';
-                                            inputData['servicecapabilitylist[' + serviceCapabilityIndex + '].capabilitytype'] = 'StretchedL2Subnet';
-                                            inputData['servicecapabilitylist[' + serviceCapabilityIndex + '].capabilityvalue'] = true;
-                                            serviceCapabilityIndex++;
-                                            break;
+                                        inputData['servicecapabilitylist[' + serviceCapabilityIndex + '].service'] = 'Connectivity';
+                                        inputData['servicecapabilitylist[' + serviceCapabilityIndex + '].capabilitytype'] = 'StretchedL2Subnet';
+                                        inputData['servicecapabilitylist[' + serviceCapabilityIndex + '].capabilityvalue'] = true;
+                                        serviceCapabilityIndex++;
+                                    } else if (k == 'supportspublicaccess' && ("Connectivity" in serviceProviderMap) && serviceProviderMap['Connectivity'] == 'NuageVsp') {
+                                        inputData['servicecapabilitylist[' + serviceCapabilityIndex + '].service'] = 'Connectivity';
+                                        inputData['servicecapabilitylist[' + serviceCapabilityIndex + '].capabilitytype'] = 'PublicAccess';
+                                        inputData['servicecapabilitylist[' + serviceCapabilityIndex + '].capabilityvalue'] = true;
+                                        serviceCapabilityIndex++;
                                     }
                                 }
-                                //removing supportsstrechedl2subnet from parameters, it has been set as capability
+                                //removing supportsstrechedl2subnet and supportspublicaccess from parameters, it has been set as capability
                                 delete inputData['supportsstrechedl2subnet'];
+                                delete inputData['supportspublicaccess'];
 
                                 // Make supported services list
                                 inputData['supportedServices'] = $.map(serviceProviderMap, function(value, key) {
@@ -3095,7 +3349,8 @@
 
 
                                 if (inputData['guestIpType'] == "Shared") { //specifyVlan checkbox is disabled, so inputData won't include specifyVlan
-                                    inputData['specifyVlan'] = true; //hardcode inputData['specifyVlan']
+                                    var $specifyVlanCheckbox = args.$form.find('.form-item[rel=specifyVlan]').find('input[type=checkbox]');
+                                    inputData['specifyVlan'] = $specifyVlanCheckbox.is(':checked'); //hardcode inputData['specifyVlan']
                                     inputData['specifyIpRanges'] = true;
                                     delete inputData.isPersistent; //if Persistent checkbox is unchecked, do not pass isPersistent parameter to API call since we need to keep API call's size as small as possible (p.s. isPersistent is defaulted as false at server-side)
                                 } else if (inputData['guestIpType'] == "Isolated") { //specifyVlan checkbox is shown
@@ -3139,6 +3394,22 @@
                                 } else {
                                     delete inputData.egressdefaultpolicy;
                                 }
+
+                                if ("promiscuousMode" in inputData) {
+                                    inputData['details[0].promiscuousMode'] = inputData.promiscuousMode;
+                                    delete inputData.promiscuousMode;
+                                }
+
+                                if ("macAddressChanges" in inputData) {
+                                    inputData['details[0].macAddressChanges'] = inputData.macAddressChanges;
+                                    delete inputData.macAddressChanges;
+                                }
+
+                                if ("forgedTransmits" in inputData) {
+                                    inputData['details[0].forgedTransmits'] = inputData.forgedTransmits;
+                                    delete inputData.forgedTransmits;
+                                }
+
 
                                 if (args.$form.find('.form-item[rel=serviceofferingid]').css("display") == "none")
                                     delete inputData.serviceofferingid;
@@ -3426,6 +3697,10 @@
                                         label: 'label.supportsstrechedl2subnet',
                                         converter: cloudStack.converters.toBooleanText
                                     },
+                                    supportspublicaccess: {
+                                        label: 'label.supportspublicaccess',
+                                        converter: cloudStack.converters.toBooleanText
+                                    },
                                     supportedServices: {
                                         label: 'label.supported.services'
                                     },
@@ -3434,6 +3709,9 @@
                                     },
                                     tags: {
                                         label: 'label.tags'
+                                    },
+                                    details: {
+                                        label: 'label.details'
                                     }
                                 }],
 
@@ -3444,9 +3722,16 @@
                                         async: true,
                                         success: function(json) {
                                             var item = json.listnetworkofferingsresponse.networkoffering[0];
+                                            if (!item.hasOwnProperty('details')) {
+                                                item.details = {};
+                                            }
                                             args.response.success({
                                                 actionFilter: networkOfferingActionfilter,
                                                 data: $.extend(item, {
+                                                    details: $.map(item.details, function(val, key) {
+                                                        return key + "=" + val;
+                                                    }).join(', '),
+
                                                     supportedServices: $.map(item.service, function(service) {
                                                         return service.name;
                                                     }).join(', '),
@@ -3583,7 +3868,10 @@
                                             });
                                             networkServiceObjs.push({
                                                 name: 'Lb',
-                                                provider: [{name: 'VpcVirtualRouter'}]
+                                                provider: [
+                                                       {name: 'VpcVirtualRouter'},
+                                                       {name: 'InternalLbVm'}
+                                                ]
                                             });
                                             networkServiceObjs.push({
                                                 name: 'Gateway',

@@ -158,6 +158,7 @@ public abstract class GenericDaoBase<T, ID extends Serializable> extends Compone
     protected static final String FOR_UPDATE_CLAUSE = " FOR UPDATE ";
     protected static final String SHARE_MODE_CLAUSE = " LOCK IN SHARE MODE";
     protected static final String SELECT_LAST_INSERT_ID_SQL = "SELECT LAST_INSERT_ID()";
+    public static final Date DATE_TO_NULL = new Date(Long.MIN_VALUE);
 
     protected static final SequenceFetcher s_seqFetcher = SequenceFetcher.getInstance();
 
@@ -942,12 +943,18 @@ public abstract class GenericDaoBase<T, ID extends Serializable> extends Compone
     @DB()
     @SuppressWarnings("unchecked")
     public T findById(final ID id) {
+        T result = null;
         if (_cache != null) {
             final Element element = _cache.get(id);
-            return element == null ? lockRow(id, null) : (T)element.getObjectValue();
+            if (element == null) {
+                result = lockRow(id, null);
+            } else {
+                result = (T)element.getObjectValue();
+            }
         } else {
-            return lockRow(id, null);
+            result = lockRow(id, null);
         }
+        return result;
     }
 
     @Override
@@ -968,8 +975,19 @@ public abstract class GenericDaoBase<T, ID extends Serializable> extends Compone
 
     @Override
     @DB()
-    public T findByIdIncludingRemoved(ID id) {
-        return findById(id, true, null);
+    public T findByIdIncludingRemoved(final ID id) {
+        T result = null;
+        if (_cache != null) {
+            final Element element = _cache.get(id);
+            if (element == null) {
+                result = findById(id, true, null);
+            } else {
+                result = (T)element.getObjectValue();
+            }
+        } else {
+            result = findById(id, true, null);
+        }
+        return result;
     }
 
     @Override
@@ -1520,7 +1538,7 @@ public abstract class GenericDaoBase<T, ID extends Serializable> extends Compone
             }
         } else if (attr.field.getType() == Date.class) {
             final Date date = (Date)value;
-            if (date == null) {
+            if (date == null || date.equals(DATE_TO_NULL)) {
                 pstmt.setObject(j, null);
                 return;
             }

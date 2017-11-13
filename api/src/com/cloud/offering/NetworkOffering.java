@@ -38,7 +38,7 @@ public interface NetworkOffering extends InfrastructureEntity, InternalIdentity,
     }
 
     public enum Detail {
-        InternalLbProvider, PublicLbProvider
+        InternalLbProvider, PublicLbProvider, servicepackageuuid, servicepackagedescription, PromiscuousMode, MacAddressChanges, ForgedTransmits
     }
 
     public final static String SystemPublicNetwork = "System-Public-Network";
@@ -131,4 +131,8 @@ public interface NetworkOffering extends InfrastructureEntity, InternalIdentity,
     boolean isKeepAliveEnabled();
 
     boolean getSupportsStrechedL2();
+
+    boolean getSupportsPublicAccess();
+
+    String getServicePackage();
 }

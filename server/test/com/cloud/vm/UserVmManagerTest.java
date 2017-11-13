@@ -16,7 +16,10 @@
 // under the License.
 
 package com.cloud.vm;
-
+import static org.hamcrest.Matchers.instanceOf;
+import static org.junit.Assert.assertThat;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.Matchers.any;
 import static org.mockito.Matchers.anyBoolean;
 import static org.mockito.Matchers.anyFloat;
@@ -34,12 +37,17 @@ import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
+import com.cloud.network.element.UserDataServiceProvider;
 import com.cloud.storage.Storage;
 import com.cloud.user.User;
 import com.cloud.event.dao.UsageEventDao;
+import com.cloud.uservm.UserVm;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mock;
@@ -232,6 +240,7 @@ public class UserVmManagerTest {
         _userVmMgr._entityMgr = _entityMgr;
         _userVmMgr._storagePoolDao = _storagePoolDao;
         _userVmMgr._vmSnapshotDao = _vmSnapshotDao;
+        _userVmMgr._configDao = _configDao;
         _userVmMgr._nicDao = _nicDao;
         _userVmMgr._networkModel = _networkModel;
         _userVmMgr._networkDao = _networkDao;
@@ -254,6 +263,56 @@ public class UserVmManagerTest {
         when(mockList.size()).thenReturn(0);
         when(_templateStoreDao.findByTemplateZoneReady(anyLong(),anyLong())).thenReturn(_templateDataStoreMock);
 
+    }
+
+
+    @Test
+    public void testValidateRootDiskResize()
+    {
+        HypervisorType hypervisorType = HypervisorType.Any;
+        Long rootDiskSize = Long.valueOf(10);
+        UserVmVO  vm = Mockito.mock(UserVmVO.class);
+        VMTemplateVO templateVO = Mockito.mock(VMTemplateVO.class);
+        Map<String, String> customParameters = new HashMap<String, String>();
+        Map<String, String> vmDetals = new HashMap<String, String>();
+
+
+        vmDetals.put("rootDiskController","ide");
+        when(vm.getDetails()).thenReturn(vmDetals);
+        when(templateVO.getSize()).thenReturn((rootDiskSize<<30)+1);
+        //Case 1: >
+        try{
+            _userVmMgr.validateRootDiskResize(hypervisorType, rootDiskSize, templateVO, vm, customParameters);
+            Assert.fail("Function should throw InvalidParameterValueException");
+        }catch(Exception e){
+            assertThat(e, instanceOf(InvalidParameterValueException.class));
+        }
+
+        //Case 2: =
+        when(templateVO.getSize()).thenReturn((rootDiskSize<<30));
+        customParameters.put("rootdisksize","10");
+        _userVmMgr.validateRootDiskResize(hypervisorType, rootDiskSize, templateVO, vm, customParameters);
+        assert(!customParameters.containsKey("rootdisksize"));
+
+        when(templateVO.getSize()).thenReturn((rootDiskSize<<30)-1);
+
+        //Case 3:  <
+
+        //Case 3.1: HypervisorType!=VMware
+        _userVmMgr.validateRootDiskResize(hypervisorType, rootDiskSize, templateVO, vm, customParameters);
+
+        hypervisorType = HypervisorType.VMware;
+        //Case 3.2:   0->(rootDiskController!=scsi)
+        try {
+            _userVmMgr.validateRootDiskResize(hypervisorType, rootDiskSize, templateVO, vm, customParameters);
+            Assert.fail("Function should throw InvalidParameterValueException");
+        }catch(Exception e) {
+            assertThat(e, instanceOf(InvalidParameterValueException.class));
+        }
+
+        //Case 3.3:   1->(rootDiskController==scsi)
+        vmDetals.put("rootDiskController","scsi");
+        _userVmMgr.validateRootDiskResize(hypervisorType, rootDiskSize, templateVO, vm, customParameters);
     }
 
     // Test restoreVm when VM state not in running/stopped case
@@ -686,7 +745,7 @@ public class UserVmManagerTest {
 
         when(_accountService.getActiveAccountById(anyLong())).thenReturn(oldAccount);
 
-        when(_accountService.getActiveAccountByName(anyString(), anyLong())).thenReturn(newAccount);
+        when(_accountMgr.finalizeOwner(any(Account.class), anyString(), anyLong(), anyLong())).thenReturn(newAccount);
 
         doThrow(new PermissionDeniedException("Access check failed")).when(_accountMgr).checkAccess(any(Account.class), any(AccessType.class), any(Boolean.class),
             any(ControlledEntity.class));
@@ -927,5 +986,74 @@ public class UserVmManagerTest {
         } finally {
             CallContext.unregister();
         }
+    }
+
+    @Test
+    public void testApplyUserDataInNetworkWithoutUserDataSupport() throws Exception {
+        UserVm userVm = mock(UserVm.class);
+        when(userVm.getId()).thenReturn(1L);
+
+        when(_nicMock.getNetworkId()).thenReturn(2L);
+        when(_networkMock.getNetworkOfferingId()).thenReturn(3L);
+        when(_networkDao.findById(2L)).thenReturn(_networkMock);
+
+        // No userdata support
+        assertFalse(_userVmMgr.applyUserData(HypervisorType.KVM, userVm, _nicMock));
+    }
+
+    @Test(expected = CloudRuntimeException.class)
+    public void testApplyUserDataInNetworkWithoutElement() throws Exception {
+        UserVm userVm = mock(UserVm.class);
+        when(userVm.getId()).thenReturn(1L);
+
+        when(_nicMock.getNetworkId()).thenReturn(2L);
+        when(_networkMock.getNetworkOfferingId()).thenReturn(3L);
+        when(_networkDao.findById(2L)).thenReturn(_networkMock);
+
+        UserDataServiceProvider userDataServiceProvider = mock(UserDataServiceProvider.class);
+        when(userDataServiceProvider.saveUserData(any(Network.class), any(NicProfile.class), any(VirtualMachineProfile.class))).thenReturn(true);
+
+        // Userdata support, but no implementing element
+        when(_networkModel.areServicesSupportedByNetworkOffering(3L, Service.UserData)).thenReturn(true);
+        _userVmMgr.applyUserData(HypervisorType.KVM, userVm, _nicMock);
+    }
+
+    @Test
+    public void testApplyUserDataSuccessful() throws Exception {
+        UserVm userVm = mock(UserVm.class);
+        when(userVm.getId()).thenReturn(1L);
+
+        when(_nicMock.getNetworkId()).thenReturn(2L);
+        when(_networkMock.getNetworkOfferingId()).thenReturn(3L);
+        when(_networkDao.findById(2L)).thenReturn(_networkMock);
+
+        UserDataServiceProvider userDataServiceProvider = mock(UserDataServiceProvider.class);
+        when(userDataServiceProvider.saveUserData(any(Network.class), any(NicProfile.class), any(VirtualMachineProfile.class))).thenReturn(true);
+
+        // Userdata support with implementing element
+        when(_networkModel.areServicesSupportedByNetworkOffering(3L, Service.UserData)).thenReturn(true);
+        when(_networkModel.getUserDataUpdateProvider(_networkMock)).thenReturn(userDataServiceProvider);
+        assertTrue(_userVmMgr.applyUserData(HypervisorType.KVM, userVm, _nicMock));
+    }
+
+    @Test
+    public void testPersistDeviceBusInfoWithNullController() {
+        when(_vmMock.getDetail(any(String.class))).thenReturn(null);
+        _userVmMgr.persistDeviceBusInfo(_vmMock, null);
+        verify(_vmDao, times(0)).saveDetails(any(UserVmVO.class));
+    }
+
+    @Test
+    public void testPersistDeviceBusInfoWithEmptyController() {
+        when(_vmMock.getDetail(any(String.class))).thenReturn("");
+        _userVmMgr.persistDeviceBusInfo(_vmMock, "");
+        verify(_vmDao, times(0)).saveDetails(any(UserVmVO.class));
+    }
+
+    @Test
+    public void testPersistDeviceBusInfo() {
+        when(_vmMock.getDetail(any(String.class))).thenReturn(null);
+        _userVmMgr.persistDeviceBusInfo(_vmMock, "lsilogic");
+        verify(_vmDao, times(1)).saveDetails(any(UserVmVO.class));
     }
 }

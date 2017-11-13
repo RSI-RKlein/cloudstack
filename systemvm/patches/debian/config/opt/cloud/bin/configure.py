@@ -42,12 +42,13 @@ from cs.CsMonitor import CsMonitor
 from cs.CsLoadBalancer import CsLoadBalancer
 from cs.CsConfig import CsConfig
 from cs.CsProcess import CsProcess
+from cs.CsStaticRoutes import CsStaticRoutes
 
 
 class CsPassword(CsDataBag):
-    
+
     TOKEN_FILE="/tmp/passwdsrvrtoken"
-    
+
     def process(self):
         for item in self.dbag:
             if item == "id":
@@ -74,27 +75,6 @@ class CsPassword(CsDataBag):
                 logging.debug("Update password server result ==> %s" % result)
 
 
-class CsStaticRoutes(CsDataBag):
-    
-    def process(self):
-        logging.debug("Processing CsStaticRoutes file ==> %s" % self.dbag)
-        for item in self.dbag:
-            if item == "id":
-                continue
-            self.__update(self.dbag[item])
-
-    def __update(self, route):
-        if route['revoke']:
-            command = "route del -net %s gw %s" % (route['network'], route['gateway'])
-            result = CsHelper.execute(command)
-        else:
-            command = "ip route show | grep %s | awk '{print $1, $3}'" % route['network']
-            result = CsHelper.execute(command)
-            if not result:
-                route_command = "route add -net %s gw %s" % (route['network'], route['gateway'])
-                result = CsHelper.execute(route_command)
-
-
 class CsAcl(CsDataBag):
     """
         Deal with Network acls
@@ -119,19 +99,27 @@ class CsAcl(CsDataBag):
 
             self.rule['allowed'] = True
             self.rule['action'] = "ACCEPT"
-                
-            if self.rule['type'] == 'all' and not obj['source_cidr_list']:
-                self.rule['cidr'] = ['0.0.0.0/0']
+
+            if self.rule['type'] == 'all' and  obj['source_cidr_list']:
+                self.rule['cidr'] = []
             else:
                 self.rule['cidr'] = obj['source_cidr_list']
+
+            if self.direction == 'egress':
+                try:
+                    if not obj['dest_cidr_list']:
+                        self.rule['dcidr'] = []
+                    else:
+                        self.rule['dcidr'] = obj['dest_cidr_list']
+                except Exception:
+                    self.rule['dcidr'] = []
 
             logging.debug("AclIP created for rule ==> %s", self.rule)
 
         def create(self):
-            for cidr in self.rule['cidr']:
-                self.add_rule(cidr)
+            self.add_rule()
 
-        def add_rule(self, cidr):
+        def add_rule(self):
             icmp_type = ''
             rule = self.rule
             icmp_type = "any"
@@ -142,64 +130,92 @@ class CsAcl(CsDataBag):
             rnge = ''
             if "first_port" in self.rule.keys() and \
                self.rule['first_port'] == self.rule['last_port']:
-                    rnge = self.rule['first_port']
+                    rnge = " --dport %s " %self.rule['first_port']
             if "first_port" in self.rule.keys() and \
                self.rule['first_port'] != self.rule['last_port']:
-                    rnge = "%s:%s" % (rule['first_port'], rule['last_port'])
-            if self.direction == 'ingress':
-                if rule['protocol'] == "icmp":
-                    self.fw.append(["mangle", "front",
-                                    " -A FIREWALL_%s" % self.ip +
-                                    " -s %s " % cidr +
-                                    " -p %s " % rule['protocol'] +
-                                    " -m %s " % rule['protocol'] +
-                                    " --icmp-type %s -j %s" % (icmp_type, self.rule['action'])])
-                else:
-                    self.fw.append(["mangle", "front",
-                                    " -A FIREWALL_%s" % self.ip +
-                                    " -s %s " % cidr +
-                                    " -p %s " % rule['protocol'] +
-                                    " -m %s " % rule['protocol'] +
-                                    " --dport %s -j RETURN" % rnge])
+                    rnge = " --dport %s:%s" % (rule['first_port'], rule['last_port'])
 
             logging.debug("Current ACL IP direction is ==> %s", self.direction)
-            if self.direction == 'egress':
-                self.fw.append(["filter", "", " -A FW_OUTBOUND -j FW_EGRESS_RULES"])
-                if rule['protocol'] == "icmp":
-                    self.fw.append(["filter", "front",
-                                    " -A FW_EGRESS_RULES" +
-                                    " -s %s " % cidr +
-                                    " -p %s " % rule['protocol'] +
-                                    " -m %s " % rule['protocol'] +
-                                    " --icmp-type %s -j %s" % (icmp_type, self.rule['action'])])
-                else:
-                    fwr = " -I FW_EGRESS_RULES"
-                    #In case we have a default rule (accept all or drop all), we have to evaluate the action again.
-                    if rule['type'] == 'all' and not rule['source_cidr_list']:
-                        fwr = " -A FW_EGRESS_RULES"
-                        # For default egress ALLOW or DENY, the logic is inverted.
-                        # Having default_egress_policy == True, means that the default rule should have ACCEPT,
-                        # otherwise DROP. The rule should be appended, not inserted.
-                        if self.rule['default_egress_policy']:
-                            self.rule['action'] = "ACCEPT"
-                        else:
-                            self.rule['action'] = "DROP"
+
+            if self.direction == 'ingress':
+                for cidr in self.rule['cidr']:
+                    if rule['protocol'] == "icmp":
+                        self.fw.append(["mangle", "front",
+                                        " -A FIREWALL_%s" % self.ip +
+                                        " -s %s " % cidr +
+                                        " -p %s " % rule['protocol'] +
+                                        " --icmp-type %s -j %s" % (icmp_type, self.rule['action'])])
                     else:
-                        # For other rules added, if default_egress_policy == True, following rules should be DROP,
-                        # otherwise ACCEPT
-                        if self.rule['default_egress_policy']:
-                            self.rule['action'] = "DROP"
-                        else:
-                            self.rule['action'] = "ACCEPT"
+                        self.fw.append(["mangle", "front",
+                                        " -A FIREWALL_%s" % self.ip +
+                                        " -s %s " % cidr +
+                                        " -p %s " % rule['protocol'] +
+                                        "  %s -j %s" % (rnge, self.rule['action'])])
 
-                    if rule['protocol'] != "all":
-                        fwr += " -s %s " % cidr + \
-                               " -p %s " % rule['protocol'] + \
-                               " -m %s " % rule['protocol'] + \
-                               " --dport %s" % rnge
+            sflag=False
+            dflag=False
+            if self.direction == 'egress':
+                ruleId = self.rule['id']
+                sourceIpsetName = 'sourceCidrIpset-%d' %ruleId
+                destIpsetName = 'destCidrIpset-%d' %ruleId
 
-                    self.fw.append(["filter", "", "%s -j %s" % (fwr, rule['action'])])
+                #create source cidr ipset
+                srcIpset = 'ipset create '+sourceIpsetName + ' hash:net '
+                dstIpset = 'ipset create '+destIpsetName + ' hash:net '
 
+                CsHelper.execute(srcIpset)
+                CsHelper.execute(dstIpset)
+                for cidr in self.rule['cidr']:
+                    ipsetAddCmd = 'ipset add '+ sourceIpsetName + ' '+cidr
+                    CsHelper.execute(ipsetAddCmd)
+                    sflag = True
+
+                logging.debug("egress   rule  ####==> %s", self.rule)
+                for cidr in self.rule['dcidr']:
+                    ipsetAddCmd = 'ipset add '+ destIpsetName + ' '+cidr
+                    CsHelper.execute(ipsetAddCmd)
+                    dflag = True
+
+                self.fw.append(["filter", "", " -A FW_OUTBOUND -j FW_EGRESS_RULES"])
+
+                fwr = " -I FW_EGRESS_RULES"
+                # In case we have a default rule (accept all or drop all), we have to evaluate the action again.
+                if rule['type'] == 'all' and not rule['source_cidr_list']:
+                    fwr = " -A FW_EGRESS_RULES"
+                    # For default egress ALLOW or DENY, the logic is inverted.
+                    # Having default_egress_policy == True, means that the default rule should have ACCEPT,
+                    # otherwise DROP. The rule should be appended, not inserted.
+                    if self.rule['default_egress_policy']:
+                        self.rule['action'] = "ACCEPT"
+                    else:
+                        self.rule['action'] = "DROP"
+                else:
+                    # For other rules added, if default_egress_policy == True, following rules should be DROP,
+                    # otherwise ACCEPT
+                    if self.rule['default_egress_policy']:
+                        self.rule['action'] = "DROP"
+                    else:
+                        self.rule['action'] = "ACCEPT"
+
+                egressIpsetStr=''
+                if sflag == True and dflag == True:
+                    egressIpsetStr = " -m set --match-set %s src " % sourceIpsetName + \
+                                " -m set --match-set %s dst " % destIpsetName
+                elif sflag == True:
+                    egressIpsetStr = " -m set --match-set %s src " % sourceIpsetName
+                elif dflag == True:
+                    egressIpsetStr = " -m set --match-set %s dst " % destIpsetName
+
+                if rule['protocol'] == "icmp":
+                    fwr += egressIpsetStr + " -p %s " % rule['protocol'] + " -m %s " % rule['protocol'] + \
+                                    " --icmp-type %s" % icmp_type
+                elif rule['protocol'] != "all":
+                    fwr += egressIpsetStr + " -p %s " % rule['protocol'] + " -m %s " % rule['protocol'] + \
+                           " %s" % rnge
+                elif rule['protocol'] == "all":
+                    fwr += egressIpsetStr
+
+                self.fw.append(["filter", "", "%s -j %s" % (fwr, rule['action'])])
                 logging.debug("EGRESS rule configured for protocol ==> %s, action ==> %s", rule['protocol'], rule['action'])
 
     class AclDevice():
@@ -283,12 +299,21 @@ class CsAcl(CsDataBag):
                 rstr = rstr.replace("  ", " ").lstrip()
                 self.fw.append([self.table, self.count, rstr])
 
+    def flushAllowAllEgressRules(self):
+        logging.debug("Flush allow 'all' egress firewall rule")
+        # Ensure that FW_EGRESS_RULES chain exists
+        CsHelper.execute("iptables-save | grep '^:FW_EGRESS_RULES' || iptables -t filter -N FW_EGRESS_RULES")
+        CsHelper.execute("iptables-save | grep '^-A FW_EGRESS_RULES -j ACCEPT$' | sed 's/^-A/iptables -t filter -D/g' | bash")
+        CsHelper.execute("iptables -F FW_EGRESS_RULES")
+        CsHelper.execute("ipset -L | grep Name:  | awk {'print $2'} | ipset flush")
+        CsHelper.execute("ipset -L | grep Name:  | awk {'print $2'} | ipset destroy")
+
     def process(self):
         for item in self.dbag:
             if item == "id":
                 continue
             if self.config.is_vpc():
-                dev_obj = self.AclDevice(self.dbag[item], self.config).create()
+                self.AclDevice(self.dbag[item], self.config).create()
             else:
                 self.AclIP(self.dbag[item], self.config).create()
 
@@ -333,6 +358,9 @@ class CsVmMetadata(CsDataBag):
         # base64 decode userdata
         if folder == "userdata" or folder == "user-data":
             if data is not None:
+                # need to pad data if it is not valid base 64
+                if len(data) % 4 != 0:
+                    data  += (4-(len(data) % 4)) * "="
                 data = base64.b64decode(data)
 
         fh = open(dest, "w")
@@ -462,16 +490,20 @@ class CsSite2SiteVpn(CsDataBag):
             if m:
                 self.confips.append(m.group(1))
 
-        for public_ip in self.dbag:
-            if public_ip == "id":
+        for vpn in self.dbag:
+            if vpn == "id":
                 continue
-            dev = CsHelper.get_device(public_ip)
+
+            local_ip = self.dbag[vpn]['local_public_ip']
+            dev = CsHelper.get_device(local_ip)
+
             if dev == "":
-                logging.error("Request for ipsec to %s not possible because ip is not configured", public_ip)
+                logging.error("Request for ipsec to %s not possible because ip is not configured", local_ip)
                 continue
+
             CsHelper.start_if_stopped("ipsec")
-            self.configure_iptables(dev, self.dbag[public_ip])
-            self.configure_ipsec(self.dbag[public_ip])
+            self.configure_iptables(dev, self.dbag[vpn])
+            self.configure_ipsec(self.dbag[vpn])
 
         # Delete vpns that are no longer in the configuration
         for ip in self.confips:
@@ -479,13 +511,13 @@ class CsSite2SiteVpn(CsDataBag):
 
     def deletevpn(self, ip):
         logging.info("Removing VPN configuration for %s", ip)
-        CsHelper.execute("ipsec auto --down vpn-%s" % ip)
-        CsHelper.execute("ipsec auto --delete vpn-%s" % ip)
+        CsHelper.execute("ipsec down vpn-%s" % ip)
+        CsHelper.execute("ipsec down vpn-%s" % ip)
         vpnconffile = "%s/ipsec.vpn-%s.conf" % (self.VPNCONFDIR, ip)
         vpnsecretsfile = "%s/ipsec.vpn-%s.secrets" % (self.VPNCONFDIR, ip)
         os.remove(vpnconffile)
         os.remove(vpnsecretsfile)
-        CsHelper.execute("ipsec auto --rereadall")
+        CsHelper.execute("ipsec reload")
 
     def configure_iptables(self, dev, obj):
         self.fw.append(["", "front", "-A INPUT -i %s -p udp -m udp --dport 500 -s %s -d %s -j ACCEPT" % (dev, obj['peer_gateway_ip'], obj['local_public_ip'])])
@@ -505,47 +537,59 @@ class CsSite2SiteVpn(CsDataBag):
     def configure_ipsec(self, obj):
         leftpeer = obj['local_public_ip']
         rightpeer = obj['peer_gateway_ip']
-        peerlist = obj['peer_guest_cidr_list'].lstrip().rstrip().replace(',', ' ')
+        peerlist = obj['peer_guest_cidr_list'].replace(' ', '')
         vpnconffile = "%s/ipsec.vpn-%s.conf" % (self.VPNCONFDIR, rightpeer)
         vpnsecretsfile = "%s/ipsec.vpn-%s.secrets" % (self.VPNCONFDIR, rightpeer)
+        ikepolicy=obj['ike_policy'].replace(';','-')
+        esppolicy=obj['esp_policy'].replace(';','-')
+
+        pfs='no'
+        if 'modp' in esppolicy:
+            pfs='yes'
+
         if rightpeer in self.confips:
             self.confips.remove(rightpeer)
         file = CsFile(vpnconffile)
+        file.add("#conn for vpn-%s" % rightpeer, 0)
         file.search("conn ", "conn vpn-%s" % rightpeer)
         file.addeq(" left=%s" % leftpeer)
         file.addeq(" leftsubnet=%s" % obj['local_guest_cidr'])
         file.addeq(" leftnexthop=%s" % obj['local_public_gateway'])
         file.addeq(" right=%s" % rightpeer)
-        file.addeq(" rightsubnets={%s}" % peerlist)
+        file.addeq(" rightsubnet=%s" % peerlist)
         file.addeq(" type=tunnel")
         file.addeq(" authby=secret")
         file.addeq(" keyexchange=ike")
-        file.addeq(" ike=%s" % obj['ike_policy'])
+        file.addeq(" ike=%s" % ikepolicy)
         file.addeq(" ikelifetime=%s" % self.convert_sec_to_h(obj['ike_lifetime']))
-        file.addeq(" esp=%s" % obj['esp_policy'])
-        file.addeq(" salifetime=%s" % self.convert_sec_to_h(obj['esp_lifetime']))
-        file.addeq(" pfs=%s" % CsHelper.bool_to_yn(obj['dpd']))
+        file.addeq(" esp=%s" % esppolicy)
+        file.addeq(" lifetime=%s" % self.convert_sec_to_h(obj['esp_lifetime']))
+        file.addeq(" pfs=%s" % pfs)
         file.addeq(" keyingtries=2")
         file.addeq(" auto=start")
+        if 'encap' not in obj:
+            obj['encap']=False
+        file.addeq(" forceencaps=%s" % CsHelper.bool_to_yn(obj['encap']))
         if obj['dpd']:
-            file.addeq("  dpddelay=30")
-            file.addeq("  dpdtimeout=120")
-            file.addeq("  dpdaction=restart")
+            file.addeq(" dpddelay=30")
+            file.addeq(" dpdtimeout=120")
+            file.addeq(" dpdaction=restart")
         secret = CsFile(vpnsecretsfile)
-        secret.search("%s " % leftpeer, "%s %s: PSK \"%s\"" % (leftpeer, rightpeer, obj['ipsec_psk']))
+        secret.search("%s " % leftpeer, "%s %s : PSK \"%s\"" % (leftpeer, rightpeer, obj['ipsec_psk']))
         if secret.is_changed() or file.is_changed():
             secret.commit()
             file.commit()
             logging.info("Configured vpn %s %s", leftpeer, rightpeer)
-            CsHelper.execute("ipsec auto --rereadall")
-            CsHelper.execute("ipsec --add vpn-%s" % rightpeer)
-            if not obj['passive']:
-                CsHelper.execute("ipsec --up vpn-%s" % rightpeer)
-        os.chmod(vpnsecretsfile, 0o400)
+            CsHelper.execute("ipsec rereadsecrets")
+
+        # This will load the new config and start the connection when needed since auto=start in the config
+        CsHelper.execute("ipsec reload")
+        os.chmod(vpnsecretsfile, 0400)
 
     def convert_sec_to_h(self, val):
         hrs = int(val) / 3600
         return "%sh" % hrs
+
 
 class CsVpnUser(CsDataBag):
     PPP_CHAP='/etc/ppp/chap-secrets'
@@ -565,25 +609,23 @@ class CsVpnUser(CsDataBag):
         userfound = False
         password = obj['password']
 
-        userSearchEntry = "%s \* %s \*"%(user,password)
         userAddEntry = "%s * %s *" %(user,password)
-        logging.debug("Adding vpn user %s" %userSearchEntry)
+        logging.debug("Adding vpn user '%s'" % user)
 
         file = CsFile(self.PPP_CHAP)
-        userfound = file.searchString(userSearchEntry, '#')
+        userfound = file.searchString(userAddEntry, '#')
         if not userfound:
-            logging.debug("User is not there already, so adding user ")
+            logging.debug("User is not there already, so adding user")
             self.del_l2tp_ipsec_user(user, obj)
             file.add(userAddEntry)
         file.commit()
 
-
     def del_l2tp_ipsec_user(self, user, obj):
         userfound = False
         password = obj['password']
-        userentry = "%s \* %s \*"%(user,password)
+        userentry = "%s * %s *" % (user,password)
 
-        logging.debug("Deleting the user %s " % user)
+        logging.debug("Deleting the user '%s'" % user)
         file = CsFile(self.PPP_CHAP)
         file.deleteLine(userentry)
         file.commit()
@@ -591,23 +633,19 @@ class CsVpnUser(CsDataBag):
         if not os.path.exists('/var/run/pppd2.tdb'):
             return
 
-        logging.debug("kiing the PPPD process for the user %s " % user)
+        logging.debug("killing the PPPD process for the user '%s'" % user)
 
         fileContents = CsHelper.execute("tdbdump /var/run/pppd2.tdb")
-        print fileContents
-
         for line in fileContents:
             if user in line:
                 contentlist = line.split(';')
                 for str in contentlist:
-                    print 'in del_l2tp str = '+ str
                     pppd = str.split('=')[0]
                     if pppd == 'PPPD_PID':
                         pid = str.split('=')[1]
                         if pid:
                             logging.debug("killing process %s" %pid)
                             CsHelper.execute('kill -9 %s' % pid)
-
 
 
 class CsRemoteAccessVpn(CsDataBag):
@@ -625,29 +663,34 @@ class CsRemoteAccessVpn(CsDataBag):
             #Enable remote access vpn
             if vpnconfig['create']:
                 logging.debug("Enabling  remote access vpn  on "+ public_ip)
+
+                dev = CsHelper.get_device(public_ip)
+                if dev == "":
+                        logging.error("Request for ipsec to %s not possible because ip is not configured", public_ip)
+                        continue
+
+                CsHelper.start_if_stopped("ipsec")
                 self.configure_l2tpIpsec(public_ip, self.dbag[public_ip])
                 logging.debug("Remote accessvpn  data bag %s",  self.dbag)
                 self.remoteaccessvpn_iptables(public_ip, self.dbag[public_ip])
 
-                CsHelper.execute("ipsec auto --rereadall")
-                CsHelper.execute("service xl2tpd stop")
+                CsHelper.execute("ipsec update")
                 CsHelper.execute("service xl2tpd start")
-                CsHelper.execute("ipsec auto --rereadsecrets")
-                CsHelper.execute("ipsec auto --replace L2TP-PSK")
+                CsHelper.execute("ipsec rereadsecrets")
             else:
                 logging.debug("Disabling remote access vpn .....")
                 #disable remote access vpn
-                CsHelper.execute("ipsec auto --down L2TP-PSK")
+                CsHelper.execute("ipsec down L2TP-PSK")
                 CsHelper.execute("service xl2tpd stop")
 
 
     def configure_l2tpIpsec(self, left,  obj):
-        vpnconffile="%s/l2tp.conf" % (self.VPNCONFDIR)
+        l2tpconffile="%s/l2tp.conf" % (self.VPNCONFDIR)
         vpnsecretfilte="%s/ipsec.any.secrets" % (self.VPNCONFDIR)
         xl2tpdconffile="/etc/xl2tpd/xl2tpd.conf"
         xl2tpoptionsfile='/etc/ppp/options.xl2tpd'
 
-        file = CsFile(vpnconffile)
+        file = CsFile(l2tpconffile)
         localip=obj['local_ip']
         localcidr=obj['local_cidr']
         publicIface=obj['public_interface']
@@ -660,6 +703,7 @@ class CsRemoteAccessVpn(CsDataBag):
 
 
         secret = CsFile(vpnsecretfilte)
+        secret.empty()
         secret.addeq(": PSK \"%s\"" %psk)
         secret.commit()
 
@@ -726,34 +770,34 @@ class CsForwardingRules(CsDataBag):
 
     #return the VR guest interface ip
     def getGuestIp(self):
-        ipr = []
+        interfaces = []
         ipAddr = None
-        for ip in self.config.address().get_ips():
-            if ip.is_guest():
-                ipr.append(ip)
-            if len(ipr) > 0:
-                ipAddr = sorted(ipr)[-1]
+        for interface in self.config.address().get_interfaces():
+            if interface.is_guest():
+                interfaces.append(interface)
+            if len(interfaces) > 0:
+                ipAddr = sorted(interfaces)[-1]
             if ipAddr:
                 return ipAddr.get_ip()
 
         return None
 
     def getDeviceByIp(self, ipa):
-        for ip in self.config.address().get_ips():
-            if ip.ip_in_subnet(ipa):
-                return ip.get_device()
+        for interface in self.config.address().get_interfaces():
+            if interface.ip_in_subnet(ipa):
+                return interface.get_device()
         return None
 
     def getNetworkByIp(self, ipa):
-        for ip in self.config.address().get_ips():
-            if ip.ip_in_subnet(ipa):
-                return ip.get_network()
+        for interface in self.config.address().get_interfaces():
+            if interface.ip_in_subnet(ipa):
+                return interface.get_network()
         return None
 
     def getGatewayByIp(self, ipa):
-        for ip in self.config.address().get_ips():
-            if ip.ip_in_subnet(ipa):
-                return ip.get_gateway()
+        for interface in self.config.address().get_interfaces():
+            if interface.ip_in_subnet(ipa):
+                return interface.get_gateway()
         return None
 
     def portsToString(self, ports, delimiter):
@@ -770,41 +814,46 @@ class CsForwardingRules(CsDataBag):
             self.forward_vr(rule)
 
     def forward_vr(self, rule):
+        #prefetch iptables variables
+        public_fwinterface = self.getDeviceByIp(rule['public_ip'])
+        internal_fwinterface = self.getDeviceByIp(rule['internal_ip'])
+        public_fwports = self.portsToString(rule['public_ports'], ':')
+        internal_fwports = self.portsToString(rule['internal_ports'], '-')
         fw1 = "-A PREROUTING -d %s/32 -i %s -p %s -m %s --dport %s -j DNAT --to-destination %s:%s" % \
               (
                 rule['public_ip'],
-                self.getDeviceByIp(rule['public_ip']),
+                public_fwinterface,
                 rule['protocol'],
                 rule['protocol'],
-                self.portsToString(rule['public_ports'], ':'),
+                public_fwports,
                 rule['internal_ip'],
-                self.portsToString(rule['internal_ports'], '-')
+                internal_fwports
               )
         fw2 = "-A PREROUTING -d %s/32 -i %s -p %s -m %s --dport %s -j DNAT --to-destination %s:%s" % \
               (
                 rule['public_ip'],
-                self.getDeviceByIp(rule['internal_ip']),
+                internal_fwinterface,
                 rule['protocol'],
                 rule['protocol'],
-                self.portsToString(rule['public_ports'], ':'),
+                public_fwports,
                 rule['internal_ip'],
-                self.portsToString(rule['internal_ports'], '-')
+                internal_fwports
               )
         fw3 = "-A OUTPUT -d %s/32 -p %s -m %s --dport %s -j DNAT --to-destination %s:%s" % \
               (
                 rule['public_ip'],
                 rule['protocol'],
                 rule['protocol'],
-                self.portsToString(rule['public_ports'], ':'),
+                public_fwports,
                 rule['internal_ip'],
-                self.portsToString(rule['internal_ports'], '-')
+                internal_fwports
               )
         fw4 = "-j SNAT --to-source %s -A POSTROUTING -s %s -d %s/32 -o %s -p %s -m %s --dport %s" % \
               (
                 self.getGuestIp(),
                 self.getNetworkByIp(rule['internal_ip']),
                 rule['internal_ip'],
-                self.getDeviceByIp(rule['internal_ip']),
+                internal_fwinterface,
                 rule['protocol'],
                 rule['protocol'],
                 self.portsToString(rule['internal_ports'], ':')
@@ -812,24 +861,24 @@ class CsForwardingRules(CsDataBag):
         fw5 = "-A PREROUTING -d %s/32 -i %s -p %s -m %s --dport %s -j MARK --set-xmark %s/0xffffffff" % \
               (
                 rule['public_ip'],
-                self.getDeviceByIp(rule['public_ip']),
+                public_fwinterface,
                 rule['protocol'],
                 rule['protocol'],
-                self.portsToString(rule['public_ports'], ':'),
-                hex(int(self.getDeviceByIp(rule['public_ip'])[3:]))
+                public_fwports,
+                hex(int(public_fwinterface[3:]))
               )
         fw6 = "-A PREROUTING -d %s/32 -i %s -p %s -m %s --dport %s -m state --state NEW -j CONNMARK --save-mark --nfmask 0xffffffff --ctmask 0xffffffff" % \
               (
                 rule['public_ip'],
-                self.getDeviceByIp(rule['public_ip']),
+                public_fwinterface,
                 rule['protocol'],
                 rule['protocol'],
-                self.portsToString(rule['public_ports'], ':'),
+                public_fwports,
               )
         fw7 = "-A FORWARD -i %s -o %s -p %s -m %s --dport %s -m state --state NEW,ESTABLISHED -j ACCEPT" % \
               (
-                self.getDeviceByIp(rule['public_ip']),
-                self.getDeviceByIp(rule['internal_ip']),
+                public_fwinterface,
+                internal_fwinterface,
                 rule['protocol'],
                 rule['protocol'],
                 self.portsToString(rule['internal_ports'], ':')
@@ -843,7 +892,7 @@ class CsForwardingRules(CsDataBag):
         self.fw.append(["filter", "", fw7])
 
     def forward_vpc(self, rule):
-        fw_prerout_rule = "-A PREROUTING -d %s/32 -i %s" % (rule["public_ip"], self.getDeviceByIp(rule['public_ip']))
+        fw_prerout_rule = "-A PREROUTING -d %s/32 " % (rule["public_ip"])
         if not rule["protocol"] == "any":
             fw_prerout_rule += " -m %s -p %s" % (rule["protocol"], rule["protocol"])
         if not rule["public_ports"] == "any":
@@ -879,6 +928,13 @@ class CsForwardingRules(CsDataBag):
         device = self.getDeviceByIp(rule["public_ip"])
         if device is None:
             raise Exception("Ip address %s has no device in the ips databag" % rule["public_ip"])
+
+        self.fw.append(["mangle", "",
+                        "-I PREROUTING -s %s/32 -m state --state NEW -j CONNMARK --save-mark --nfmask 0xffffffff --ctmask 0xffffffff" % \
+                        rule["internal_ip"]])
+        self.fw.append(["mangle", "",
+                        "-I PREROUTING -s %s/32 -m state --state NEW -j MARK --set-xmark 0x%s/0xffffffff" % \
+                        (rule["internal_ip"], device[len("eth"):])])
         self.fw.append(["nat", "front",
                         "-A PREROUTING -d %s/32 -j DNAT --to-destination %s" % (rule["public_ip"], rule["internal_ip"])])
         self.fw.append(["nat", "front",
@@ -896,79 +952,124 @@ class CsForwardingRules(CsDataBag):
 
 
 def main(argv):
+    # The file we are currently processing, if it is "cmd_line.json" everything will be processed.
+    process_file = argv[1]
+
+    # process_file can be None, if so assume cmd_line.json
+    if process_file is None:
+        process_file = "cmd_line.json"
+
+    # Track if changes need to be committed to NetFilter
+    iptables_change = False
+
+    # The "GLOBAL" Configuration object
     config = CsConfig()
+
     logging.basicConfig(filename=config.get_logger(),
                         level=config.get_level(),
                         format=config.get_format())
-    config.set_address()
+    try:
+        # Load stored ip adresses from disk to CsConfig()
+        config.set_address()
 
-    logging.debug("Configuring ip addresses")
-    # IP configuration
-    config.address().compare()
-    config.address().process()
+        logging.debug("Configuring ip addresses")
+        config.address().compare()
+        config.address().process()
 
-    logging.debug("Configuring vmpassword")
-    password = CsPassword("vmpassword", config)
-    password.process()
+        if process_file in ["cmd_line.json", "guest_network.json"]:
+            logging.debug("Configuring Guest Network")
+            iptables_change = True
 
-    logging.debug("Configuring vmdata")
-    metadata = CsVmMetadata('vmdata', config)
-    metadata.process()
+        if process_file in ["cmd_line.json", "vm_password.json"]:
+            logging.debug("Configuring vmpassword")
+            password = CsPassword("vmpassword", config)
+            password.process()
 
-    logging.debug("Configuring networkacl")
-    acls = CsAcl('networkacl', config)
-    acls.process()
+        if process_file in ["cmd_line.json", "vm_metadata.json"]:
+            logging.debug("Configuring vmdata")
+            metadata = CsVmMetadata('vmdata', config)
+            metadata.process()
 
-    logging.debug("Configuring firewall rules")
-    acls = CsAcl('firewallrules', config)
-    acls.process()
+        if process_file in ["cmd_line.json", "network_acl.json"]:
+            logging.debug("Configuring networkacl")
+            iptables_change = True
 
-    logging.debug("Configuring PF rules")
-    fwd = CsForwardingRules("forwardingrules", config)
-    fwd.process()
+        if process_file in ["cmd_line.json", "firewall_rules.json"]:
+            logging.debug("Configuring firewall rules")
+            iptables_change = True
 
-    logging.debug("Configuring s2s vpn")
-    vpns = CsSite2SiteVpn("site2sitevpn", config)
-    vpns.process()
+        if process_file in ["cmd_line.json", "forwarding_rules.json", "staticnat_rules.json"]:
+            logging.debug("Configuring PF rules")
+            iptables_change = True
 
-    logging.debug("Configuring remote access vpn")
-    #remote access vpn
-    rvpn = CsRemoteAccessVpn("remoteaccessvpn", config)
-    rvpn.process()
+        if process_file in ["cmd_line.json", "site_2_site_vpn.json"]:
+            logging.debug("Configuring s2s vpn")
+            iptables_change = True
 
-    logging.debug("Configuring vpn users list")
-    #remote access vpn users
-    vpnuser = CsVpnUser("vpnuserlist", config)
-    vpnuser.process()
+        if process_file in ["cmd_line.json", "remote_access_vpn.json"]:
+            logging.debug("Configuring remote access vpn")
+            iptables_change = True
 
-    logging.debug("Configuring dhcp entry")
-    dhcp = CsDhcp("dhcpentry", config)
-    dhcp.process()
+        if process_file in ["cmd_line.json", "vpn_user_list.json"]:
+            logging.debug("Configuring vpn users list")
+            vpnuser = CsVpnUser("vpnuserlist", config)
+            vpnuser.process()
 
-    logging.debug("Configuring load balancer")
-    lb = CsLoadBalancer("loadbalancer", config)
-    lb.process()
+        if process_file in ["cmd_line.json", "vm_dhcp_entry.json", "dhcp.json"]:
+            logging.debug("Configuring dhcp entry")
+            dhcp = CsDhcp("dhcpentry", config)
+            dhcp.process()
 
-    logging.debug("Configuring monitor service")
-    mon = CsMonitor("monitorservice", config)
-    mon.process()
+        if process_file in ["cmd_line.json", "load_balancer.json"]:
+            logging.debug("Configuring load balancer")
+            iptables_change = True
 
-    logging.debug("Configuring iptables rules")
-    nf = CsNetfilters()
-    nf.compare(config.get_fw())
+        if process_file in ["cmd_line.json", "monitor_service.json"]:
+            logging.debug("Configuring monitor service")
+            mon = CsMonitor("monitorservice", config)
+            mon.process()
 
-    red = CsRedundant(config)
-    red.set()
+        # If iptable rules have changed, apply them.
+        if iptables_change:
+            acls = CsAcl('networkacl', config)
+            acls.process()
 
-    logging.debug("Configuring static routes")
-    static_routes = CsStaticRoutes("staticroutes", config)
-    static_routes.process()
+            acls = CsAcl('firewallrules', config)
+            acls.flushAllowAllEgressRules()
+            acls.process()
 
-    logging.debug("Configuring iptables rules done ...saving rules")
+            fwd = CsForwardingRules("forwardingrules", config)
+            fwd.process()
 
-    # Save iptables configuration - will be loaded on reboot by the iptables-restore that is configured on /etc/rc.local
-    CsHelper.save_iptables("iptables-save", "/etc/iptables/router_rules.v4")
-    CsHelper.save_iptables("ip6tables-save", "/etc/iptables/router_rules.v6")
+            vpns = CsSite2SiteVpn("site2sitevpn", config)
+            vpns.process()
+
+            rvpn = CsRemoteAccessVpn("remoteaccessvpn", config)
+            rvpn.process()
+
+            lb = CsLoadBalancer("loadbalancer", config)
+            lb.process()
+
+            logging.debug("Configuring iptables rules")
+            nf = CsNetfilters()
+            nf.compare(config.get_fw())
+
+            logging.debug("Configuring iptables rules done ...saving rules")
+
+            # Save iptables configuration - will be loaded on reboot by the iptables-restore that is configured on /etc/rc.local
+            CsHelper.save_iptables("iptables-save", "/etc/iptables/router_rules.v4")
+            CsHelper.save_iptables("ip6tables-save", "/etc/iptables/router_rules.v6")
+
+        red = CsRedundant(config)
+        red.set()
+
+        if process_file in ["cmd_line.json", "static_routes.json"]:
+            logging.debug("Configuring static routes")
+            static_routes = CsStaticRoutes("staticroutes", config)
+            static_routes.process()
+    except Exception:
+        logging.exception("Exception while configuring router")
+        return 1
 
 if __name__ == "__main__":
     main(sys.argv)

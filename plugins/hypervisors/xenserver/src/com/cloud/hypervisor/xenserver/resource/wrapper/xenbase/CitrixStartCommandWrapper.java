@@ -87,7 +87,6 @@ public final class CitrixStartCommandWrapper extends CommandWrapper<StartCommand
 
             final Host host = Host.getByUuid(conn, citrixResourceBase.getHost().getUuid());
             vm = citrixResourceBase.createVmFromTemplate(conn, vmSpec, host);
-
             final GPUDeviceTO gpuDevice = vmSpec.getGpuDevice();
             if (gpuDevice != null) {
                 s_logger.debug("Creating VGPU for of VGPU type: " + gpuDevice.getVgpuType() + " in GPU group " + gpuDevice.getGpuGroup() + " for VM " + vmName);
@@ -108,11 +107,13 @@ public final class CitrixStartCommandWrapper extends CommandWrapper<StartCommand
                 }
                 index++;
             }
+
             for (DiskTO disk : disks) {
-                final VDI newVdi = citrixResourceBase.prepareManagedDisk(conn, disk, vmName);
+                final VDI newVdi = citrixResourceBase.prepareManagedDisk(conn, disk, vmSpec.getId(), vmSpec.getName());
 
                 if (newVdi != null) {
                     final String path = newVdi.getUuid(conn);
+
                     iqnToPath.put(disk.getDetails().get(DiskTO.IQN), path);
                 }
 

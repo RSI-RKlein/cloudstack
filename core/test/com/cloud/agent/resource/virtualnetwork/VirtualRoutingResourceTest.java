@@ -31,6 +31,7 @@ import java.util.UUID;
 
 import javax.naming.ConfigurationException;
 
+import org.joda.time.Duration;
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
@@ -97,11 +98,11 @@ public class VirtualRoutingResourceTest implements VirtualRouterDeployer {
 
     @Override
     public ExecutionResult executeInVR(final String routerIp, final String script, final String args) {
-        return executeInVR(routerIp, script, args, 60);
+        return executeInVR(routerIp, script, args, Duration.standardSeconds(60L));
     }
 
     @Override
-    public ExecutionResult executeInVR(final String routerIp, final String script, final String args, final int timeout) {
+    public ExecutionResult executeInVR(final String routerIp, final String script, final String args, final Duration timeout) {
         assertEquals(routerIp, ROUTERIP);
         verifyCommand(_currentCmd, script, args);
         return new ExecutionResult(true, null);
@@ -494,17 +495,17 @@ public class VirtualRoutingResourceTest implements VirtualRouterDeployer {
     public void testSite2SiteVpnCfgCommand() {
         _count = 0;
 
-        Site2SiteVpnCfgCommand cmd = new Site2SiteVpnCfgCommand(true, "64.10.1.10", "64.10.1.1", "192.168.1.1/16", "124.10.1.10", "192.168.100.1/24", "3des-sha1,aes128-sha1;modp1536", "3des-sha1,aes128-md5", "psk", Long.valueOf(1800), Long.valueOf(1800), true, false);
+        Site2SiteVpnCfgCommand cmd = new Site2SiteVpnCfgCommand(true, "64.10.1.10", "64.10.1.1", "192.168.1.1/16", "124.10.1.10", "192.168.100.1/24", "3des-sha1,aes128-sha1;modp1536", "3des-sha1,aes128-md5", "psk", Long.valueOf(1800), Long.valueOf(1800), true, false, false);
         cmd.setAccessDetail(NetworkElementCommand.ROUTER_NAME, ROUTERNAME);
         Answer answer = _resource.executeRequest(cmd);
         assertTrue(answer.getResult());
 
-        cmd = new Site2SiteVpnCfgCommand(true, "64.10.1.10", "64.10.1.1", "192.168.1.1/16", "124.10.1.10", "192.168.100.1/24", "3des-sha1,aes128-sha1;modp1536", "3des-sha1,aes128-md5", "psk", Long.valueOf(1800), Long.valueOf(1800), false, true);
+        cmd = new Site2SiteVpnCfgCommand(true, "64.10.1.10", "64.10.1.1", "192.168.1.1/16", "124.10.1.10", "192.168.100.1/24", "3des-sha1,aes128-sha1;modp1536", "3des-sha1,aes128-md5", "psk", Long.valueOf(1800), Long.valueOf(1800), false, true, false);
         cmd.setAccessDetail(NetworkElementCommand.ROUTER_NAME, ROUTERNAME);
         answer = _resource.executeRequest(cmd);
         assertTrue(answer.getResult());
 
-        cmd = new Site2SiteVpnCfgCommand(false, "64.10.1.10", "64.10.1.1", "192.168.1.1/16", "124.10.1.10", "192.168.100.1/24", "3des-sha1,aes128-sha1;modp1536", "3des-sha1,aes128-md5", "psk", Long.valueOf(1800), Long.valueOf(1800), false, true);
+        cmd = new Site2SiteVpnCfgCommand(false, "64.10.1.10", "64.10.1.1", "192.168.1.1/16", "124.10.1.10", "192.168.100.1/24", "3des-sha1,aes128-sha1;modp1536", "3des-sha1,aes128-md5", "psk", Long.valueOf(1800), Long.valueOf(1800), false, true, false);
         cmd.setAccessDetail(NetworkElementCommand.ROUTER_NAME, ROUTERNAME);
         answer = _resource.executeRequest(cmd);
         assertTrue(answer.getResult());

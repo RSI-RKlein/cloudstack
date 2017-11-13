@@ -36,7 +36,12 @@ class CsRoute:
         filename = "/etc/iproute2/rt_tables"
         logging.info(
             "Adding route table: " + str + " to " + filename + " if not present ")
-        CsHelper.addifmissing(filename, str)
+        if not CsHelper.definedinfile(filename, str):
+             CsHelper.execute("sudo echo " + str + " >> /etc/iproute2/rt_tables")
+        # remove "from all table tablename" if exists, else it will interfer with
+        # routing of unintended traffic
+        if self.findRule("from all lookup " + tablename):
+             CsHelper.execute("sudo ip rule delete from all table " + tablename)
 
     def flush_table(self, tablename):
         CsHelper.execute("ip route flush table %s" % (tablename))
@@ -49,6 +54,16 @@ class CsRoute:
         logging.info("Adding route: dev " + dev + " table: " +
                      table + " network: " + address + " if not present")
         cmd = "dev %s table %s %s" % (dev, table, address)
+        cmd = "default via %s table %s proto static" % (address, table)
+        self.set_route(cmd)
+
+    def add_network_route(self, dev, address):
+        """ Wrapper method that adds table name and device to route statement """
+        # ip route add dev eth1 table Table_eth1 10.0.2.0/24
+        table = self.get_tablename(dev)
+        logging.info("Adding route: dev " + dev + " table: " +
+                     table + " network: " + address + " if not present")
+        cmd = "dev %s table %s throw %s proto static" % (dev, table, address)
         self.set_route(cmd)
 
     def set_route(self, cmd, method="add"):
@@ -73,7 +88,7 @@ class CsRoute:
         """
         if not gateway:
             raise Exception("Gateway cannot be None.")
-        
+
         if self.defaultroute_exists():
             return False
         else:
@@ -95,3 +110,9 @@ class CsRoute:
         else:
             logging.warn("No default route found!")
             return False
+
+    def findRule(self, rule):
+        for i in CsHelper.execute("ip rule show"):
+            if rule in i.strip():
+                return True
+        return False

@@ -745,11 +745,19 @@
                         }
                     },
                     dataProvider: function(args) {
+                        var data = {
+                            page: args.page,
+                            pageSize: pageSize,
+                            networkid: args.context.networks[0].id,
+                            listAll: true
+                        };
+                        var keyword = (((args || {}).filterBy || {}).search || {}).value;
+                        if (keyword) {
+                            data.keyword = keyword;
+                        }
                         $.ajax({
                             url: createURL('listLoadBalancers'),
-                            data: {
-                                networkid: args.context.networks[0].id
-                            },
+                            data: data,
                             success: function(json) {
                                 var items = json.listloadbalancersresponse.loadbalancer;
                                 if (items != null) {
@@ -1132,7 +1140,8 @@
                             async: false,
                             data: {
                                 associatednetworkid: args.context.networks[0].id,
-                                forloadbalancing: true
+                                forloadbalancing: true,
+                                listall: true
                             },
                             success: function(json) {
                                 var items = json.listpublicipaddressesresponse.publicipaddress;
@@ -2900,6 +2909,12 @@
                                         },
                                         dpd: {
                                             label: 'label.dead.peer.detection',
+                                            converter: function(str) {
+                                                return str ? 'Yes' : 'No';
+                                            }
+                                        },
+                                        forceencap: {
+                                            label: 'label.vpn.force.encapsulation',
                                             converter: function(str) {
                                                 return str ? 'Yes' : 'No';
                                             }

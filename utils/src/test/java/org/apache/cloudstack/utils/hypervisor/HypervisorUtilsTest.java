@@ -57,8 +57,8 @@ public class HypervisorUtilsTest {
     public void checkVolumeFileForActivityTest() throws IOException {
         System.out.print("Testing block on modified files - ");
         String filePath = "./testfileinactive";
-        int timeoutSeconds = 5;
-        long thresholdMilliseconds = 2000;
+        int timeoutSeconds = 8;
+        long thresholdMilliseconds = 1000;
         File file = new File(filePath);
 
         long startTime = setupcheckVolumeFileForActivityFile(file, _minFileSize);

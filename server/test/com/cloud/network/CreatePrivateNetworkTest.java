@@ -103,7 +103,7 @@ public class CreatePrivateNetworkTest {
 
         NetworkOfferingVO ntwkOff =
             new NetworkOfferingVO("offer", "fakeOffer", TrafficType.Guest, true, true, null, null, false, null, null, GuestType.Isolated, false, false, false, false,
-                false, false, false, false, false, false, false, false, false, false);
+                false, false, false, false, false, false, false, false, false, false, false);
         when(networkService._networkOfferingDao.findById(anyLong())).thenReturn(ntwkOff);
         List<NetworkOfferingVO> netofferlist = new ArrayList<NetworkOfferingVO>();
         netofferlist.add(ntwkOff);
@@ -121,7 +121,7 @@ public class CreatePrivateNetworkTest {
             new NetworkVO(1L, TrafficType.Guest, Mode.None, BroadcastDomainType.Vlan, 1L, 1L, 1L, 1L, "bla", "fake", "eet.net", GuestType.Isolated, 1L, 1L,
                 ACLType.Account, false, 1L, false);
         when(
-            networkService._networkMgr.createGuestNetwork(eq(ntwkOff.getId()), eq("bla"), eq("fake"), eq("10.1.1.1"), eq("10.1.1.0/24"), anyString(), anyString(),
+            networkService._networkMgr.createGuestNetwork(eq(ntwkOff.getId()), eq("bla"), eq("fake"), eq("10.1.1.1"), eq("10.1.1.0/24"), anyString(), anyBoolean(), anyString(),
                 eq(account), anyLong(), eq(physicalNetwork), eq(physicalNetwork.getDataCenterId()), eq(ACLType.Account), anyBoolean(), eq(1L), anyString(), anyString(),
                 anyBoolean(), anyString())).thenReturn(net);
 

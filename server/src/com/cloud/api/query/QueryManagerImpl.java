@@ -125,7 +125,6 @@ import com.cloud.api.query.dao.ResourceTagJoinDao;
 import com.cloud.api.query.dao.SecurityGroupJoinDao;
 import com.cloud.api.query.dao.ServiceOfferingJoinDao;
 import com.cloud.api.query.dao.StoragePoolJoinDao;
-import com.cloud.api.query.dao.StorageTagDao;
 import com.cloud.api.query.dao.TemplateJoinDao;
 import com.cloud.api.query.dao.UserAccountJoinDao;
 import com.cloud.api.query.dao.UserVmJoinDao;
@@ -149,7 +148,6 @@ import com.cloud.api.query.vo.ResourceTagJoinVO;
 import com.cloud.api.query.vo.SecurityGroupJoinVO;
 import com.cloud.api.query.vo.ServiceOfferingJoinVO;
 import com.cloud.api.query.vo.StoragePoolJoinVO;
-import com.cloud.api.query.vo.StorageTagVO;
 import com.cloud.api.query.vo.TemplateJoinVO;
 import com.cloud.api.query.vo.UserAccountJoinVO;
 import com.cloud.api.query.vo.UserVmJoinVO;
@@ -190,8 +188,10 @@ import com.cloud.storage.ScopeType;
 import com.cloud.storage.Storage;
 import com.cloud.storage.Storage.ImageFormat;
 import com.cloud.storage.Storage.TemplateType;
+import com.cloud.storage.StoragePoolTagVO;
 import com.cloud.storage.VMTemplateVO;
 import com.cloud.storage.Volume;
+import com.cloud.storage.dao.StoragePoolTagsDao;
 import com.cloud.storage.dao.VMTemplateDao;
 import com.cloud.tags.ResourceTagVO;
 import com.cloud.tags.dao.ResourceTagDao;
@@ -205,7 +205,6 @@ import com.cloud.utils.DateUtil;
 import com.cloud.utils.Pair;
 import com.cloud.utils.StringUtils;
 import com.cloud.utils.Ternary;
-import com.cloud.utils.component.ManagerBase;
 import com.cloud.utils.db.Filter;
 import com.cloud.utils.db.JoinBuilder;
 import com.cloud.utils.db.SearchBuilder;
@@ -222,7 +221,7 @@ import com.cloud.vm.dao.UserVmDetailsDao;
 import com.cloud.vm.dao.VMInstanceDao;
 
 @Component
-public class QueryManagerImpl extends ManagerBase implements QueryService, Configurable {
+public class QueryManagerImpl extends MutualExclusiveIdsManagerBase implements QueryService, Configurable {
 
     public static final Logger s_logger = Logger.getLogger(QueryManagerImpl.class);
 
@@ -307,7 +306,7 @@ public class QueryManagerImpl extends ManagerBase implements QueryService, Confi
     private StoragePoolJoinDao _poolJoinDao;
 
     @Inject
-    private StorageTagDao _storageTagDao;
+    private StoragePoolTagsDao _storageTagDao;
 
     @Inject
     private HostTagDao _hostTagDao;
@@ -1578,6 +1577,8 @@ public class QueryManagerImpl extends ManagerBase implements QueryService, Confi
         Object cluster = cmd.getClusterId();
         Object id = cmd.getId();
         Object keyword = cmd.getKeyword();
+        Object outOfBandManagementEnabled = cmd.isOutOfBandManagementEnabled();
+        Object powerState = cmd.getHostOutOfBandManagementPowerState();
         Object resourceState = cmd.getResourceState();
         Object haHosts = cmd.getHaHost();
         Long startIndex = cmd.getStartIndex();
@@ -1596,6 +1597,8 @@ public class QueryManagerImpl extends ManagerBase implements QueryService, Confi
         sb.and("dataCenterId", sb.entity().getZoneId(), SearchCriteria.Op.EQ);
         sb.and("podId", sb.entity().getPodId(), SearchCriteria.Op.EQ);
         sb.and("clusterId", sb.entity().getClusterId(), SearchCriteria.Op.EQ);
+        sb.and("oobmEnabled", sb.entity().isOutOfBandManagementEnabled(), SearchCriteria.Op.EQ);
+        sb.and("powerState", sb.entity().getOutOfBandManagementPowerState(), SearchCriteria.Op.EQ);
         sb.and("resourceState", sb.entity().getResourceState(), SearchCriteria.Op.EQ);
         sb.and("hypervisor_type", sb.entity().getHypervisorType(), SearchCriteria.Op.EQ);
 
@@ -1643,6 +1646,14 @@ public class QueryManagerImpl extends ManagerBase implements QueryService, Confi
         }
         if (cluster != null) {
             sc.setParameters("clusterId", cluster);
+        }
+
+        if (outOfBandManagementEnabled != null) {
+            sc.setParameters("oobmEnabled", outOfBandManagementEnabled);
+        }
+
+        if (powerState != null) {
+            sc.setParameters("powerState", powerState);
         }
 
         if (resourceState != null) {
@@ -1725,11 +1736,14 @@ public class QueryManagerImpl extends ManagerBase implements QueryService, Confi
         String type = cmd.getType();
         Map<String, String> tags = cmd.getTags();
         Long storageId = cmd.getStorageId();
+        Long clusterId = cmd.getClusterId();
         Long diskOffId = cmd.getDiskOfferingId();
         Boolean display = cmd.getDisplay();
 
         Long zoneId = cmd.getZoneId();
         Long podId = cmd.getPodId();
+
+        List<Long> ids = getIdsListFromCmd(cmd.getId(), cmd.getIds());
 
         Ternary<Long, Boolean, ListProjectResourcesCriteria> domainIdRecursiveListProject = new Ternary<Long, Boolean, ListProjectResourcesCriteria>(
                 cmd.getDomainId(), cmd.isRecursive(), null);
@@ -1754,7 +1768,9 @@ public class QueryManagerImpl extends ManagerBase implements QueryService, Confi
 
         sb.and("name", sb.entity().getName(), SearchCriteria.Op.EQ);
         sb.and("id", sb.entity().getId(), SearchCriteria.Op.EQ);
+        sb.and("idIN", sb.entity().getId(), SearchCriteria.Op.IN);
         sb.and("volumeType", sb.entity().getVolumeType(), SearchCriteria.Op.LIKE);
+        sb.and("uuid", sb.entity().getUuid(), SearchCriteria.Op.NNULL);
         sb.and("instanceId", sb.entity().getVmId(), SearchCriteria.Op.EQ);
         sb.and("dataCenterId", sb.entity().getDataCenterId(), SearchCriteria.Op.EQ);
         sb.and("podId", sb.entity().getPodId(), SearchCriteria.Op.EQ);
@@ -1789,6 +1805,8 @@ public class QueryManagerImpl extends ManagerBase implements QueryService, Confi
         if (display != null) {
             sc.setParameters("display", display);
         }
+
+        setIdsListToSearchCriteria(sc, ids);
 
         sc.setParameters("systemUse", 1);
 
@@ -1828,6 +1846,9 @@ public class QueryManagerImpl extends ManagerBase implements QueryService, Confi
             sc.setParameters("storageId", storageId);
         }
 
+        if (clusterId != null) {
+            sc.setParameters("clusterId", clusterId);
+        }
         // Don't return DomR and ConsoleProxy volumes
         sc.setParameters("type", VirtualMachine.Type.ConsoleProxy, VirtualMachine.Type.SecondaryStorageVm, VirtualMachine.Type.DomainRouter);
 
@@ -1861,7 +1882,7 @@ public class QueryManagerImpl extends ManagerBase implements QueryService, Confi
             respView = ResponseView.Full;
         }
 
-        List<DomainResponse> domainResponses = ViewResponseHelper.createDomainResponse(respView, result.first().toArray(
+        List<DomainResponse> domainResponses = ViewResponseHelper.createDomainResponse(respView, cmd.getDetails(), result.first().toArray(
                 new DomainJoinVO[result.first().size()]));
         response.setResponses(domainResponses, result.second());
         return response;
@@ -2252,43 +2273,43 @@ public class QueryManagerImpl extends ManagerBase implements QueryService, Confi
 
     @Override
     public ListResponse<StorageTagResponse> searchForStorageTags(ListStorageTagsCmd cmd) {
-        Pair<List<StorageTagVO>, Integer> result = searchForStorageTagsInternal(cmd);
+        Pair<List<StoragePoolTagVO>, Integer> result = searchForStorageTagsInternal(cmd);
         ListResponse<StorageTagResponse> response = new ListResponse<StorageTagResponse>();
-        List<StorageTagResponse> tagResponses = ViewResponseHelper.createStorageTagResponse(result.first().toArray(new StorageTagVO[result.first().size()]));
+        List<StorageTagResponse> tagResponses = ViewResponseHelper.createStorageTagResponse(result.first().toArray(new StoragePoolTagVO[result.first().size()]));
 
         response.setResponses(tagResponses, result.second());
 
         return response;
     }
 
-    private Pair<List<StorageTagVO>, Integer> searchForStorageTagsInternal(ListStorageTagsCmd cmd) {
-        Filter searchFilter = new Filter(StorageTagVO.class, "id", Boolean.TRUE, null, null);
+    private Pair<List<StoragePoolTagVO>, Integer> searchForStorageTagsInternal(ListStorageTagsCmd cmd) {
+        Filter searchFilter = new Filter(StoragePoolTagVO.class, "id", Boolean.TRUE, null, null);
 
-        SearchBuilder<StorageTagVO> sb = _storageTagDao.createSearchBuilder();
+        SearchBuilder<StoragePoolTagVO> sb = _storageTagDao.createSearchBuilder();
 
         sb.select(null, Func.DISTINCT, sb.entity().getId()); // select distinct
 
-        SearchCriteria<StorageTagVO> sc = sb.create();
+        SearchCriteria<StoragePoolTagVO> sc = sb.create();
 
         // search storage tag details by ids
-        Pair<List<StorageTagVO>, Integer> uniqueTagPair = _storageTagDao.searchAndCount(sc, searchFilter);
+        Pair<List<StoragePoolTagVO>, Integer> uniqueTagPair = _storageTagDao.searchAndCount(sc, searchFilter);
         Integer count = uniqueTagPair.second();
 
         if (count.intValue() == 0) {
             return uniqueTagPair;
         }
 
-        List<StorageTagVO> uniqueTags = uniqueTagPair.first();
+        List<StoragePoolTagVO> uniqueTags = uniqueTagPair.first();
         Long[] vrIds = new Long[uniqueTags.size()];
         int i = 0;
 
-        for (StorageTagVO v : uniqueTags) {
+        for (StoragePoolTagVO v : uniqueTags) {
             vrIds[i++] = v.getId();
         }
 
-        List<StorageTagVO> vrs = _storageTagDao.searchByIds(vrIds);
+        List<StoragePoolTagVO> vrs = _storageTagDao.searchByIds(vrIds);
 
-        return new Pair<List<StorageTagVO>, Integer>(vrs, count);
+        return new Pair<List<StoragePoolTagVO>, Integer>(vrs, count);
     }
 
     @Override
@@ -2620,11 +2641,11 @@ public class QueryManagerImpl extends ManagerBase implements QueryService, Confi
         if(currentVmOffering == null) return offerings;
         List<String> currentTagsList = StringUtils.csvTagsToList(currentVmOffering.getTags());
 
-        // New offerings should be a subset of existing storage tags. Discard offerings who are not.
+        // New service offering should have all the tags of the current service offering.
         List<ServiceOfferingJoinVO> filteredOfferings = new ArrayList<>();
         for (ServiceOfferingJoinVO offering : offerings){
-            List<String> tags = StringUtils.csvTagsToList(offering.getTags());
-            if(currentTagsList.containsAll(tags)){
+            List<String> newTagsList = StringUtils.csvTagsToList(offering.getTags());
+            if(newTagsList.containsAll(currentTagsList)){
                 filteredOfferings.add(offering);
             }
         }
@@ -3075,16 +3096,18 @@ public class QueryManagerImpl extends ManagerBase implements QueryService, Confi
         boolean showDomr = ((templateFilter != TemplateFilter.selfexecutable) && (templateFilter != TemplateFilter.featured));
         HypervisorType hypervisorType = HypervisorType.getType(cmd.getHypervisor());
 
+
         return searchForTemplatesInternal(id, cmd.getTemplateName(), cmd.getKeyword(), templateFilter, false, null,
                 cmd.getPageSizeVal(), cmd.getStartIndex(), cmd.getZoneId(), hypervisorType, showDomr,
-                cmd.listInReadyState(), permittedAccounts, caller, listProjectResourcesCriteria, tags, showRemovedTmpl);
+                cmd.listInReadyState(), permittedAccounts, caller, listProjectResourcesCriteria, tags, showRemovedTmpl,
+                cmd.getIds());
     }
 
     private Pair<List<TemplateJoinVO>, Integer> searchForTemplatesInternal(Long templateId, String name,
             String keyword, TemplateFilter templateFilter, boolean isIso, Boolean bootable, Long pageSize,
             Long startIndex, Long zoneId, HypervisorType hyperType, boolean showDomr, boolean onlyReady,
             List<Account> permittedAccounts, Account caller, ListProjectResourcesCriteria listProjectResourcesCriteria,
-            Map<String, String> tags, boolean showRemovedTmpl) {
+            Map<String, String> tags, boolean showRemovedTmpl, List<Long> ids) {
 
         // check if zone is configured, if not, just return empty list
         List<HypervisorType> hypers = null;
@@ -3104,6 +3127,9 @@ public class QueryManagerImpl extends ManagerBase implements QueryService, Confi
 
         SearchBuilder<TemplateJoinVO> sb = _templateJoinDao.createSearchBuilder();
         sb.select(null, Func.DISTINCT, sb.entity().getTempZonePair()); // select distinct (templateId, zoneId) pair
+        if (ids != null && !ids.isEmpty()){
+            sb.and("idIN", sb.entity().getId(), SearchCriteria.Op.IN);
+        }
         SearchCriteria<TemplateJoinVO> sc = sb.create();
 
         // verify templateId parameter and specially handle it
@@ -3126,9 +3152,14 @@ public class QueryManagerImpl extends ManagerBase implements QueryService, Confi
                 ex.addProxyObject(template.getUuid(), "templateId");
                 throw ex;
             }
+            if (!template.isPublicTemplate() && caller.getType() == Account.ACCOUNT_TYPE_DOMAIN_ADMIN) {
+                Account template_acc = _accountMgr.getAccount(template.getAccountId());
+                DomainVO domain = _domainDao.findById(template_acc.getDomainId());
+                _accountMgr.checkAccess(caller, domain);
+            }
 
             // if template is not public, perform permission check here
-            if (!template.isPublicTemplate() && caller.getType() != Account.ACCOUNT_TYPE_ADMIN) {
+            else if (!template.isPublicTemplate() && caller.getType() != Account.ACCOUNT_TYPE_ADMIN) {
                 _accountMgr.checkAccess(caller, null, false, template);
             }
 
@@ -3148,6 +3179,8 @@ public class QueryManagerImpl extends ManagerBase implements QueryService, Confi
             // if (!isIso) {
             // hypers = _resourceMgr.listAvailHypervisorInZone(null, null);
             // }
+
+            setIdsListToSearchCriteria(sc, ids);
 
             // add criteria for project or not
             if (listProjectResourcesCriteria == ListProjectResourcesCriteria.SkipProjectResources) {
@@ -3233,6 +3266,19 @@ public class QueryManagerImpl extends ManagerBase implements QueryService, Confi
                     scc.addOr("accountId", SearchCriteria.Op.IN, permittedAccountIds.toArray());
                 }
                 sc.addAnd("publicTemplate", SearchCriteria.Op.SC, scc);
+            }else if (templateFilter == TemplateFilter.all && caller.getType() != Account.ACCOUNT_TYPE_ADMIN ){
+                SearchCriteria<TemplateJoinVO> scc = _templateJoinDao.createSearchCriteria();
+                scc.addOr("publicTemplate", SearchCriteria.Op.EQ, true);
+
+                if (listProjectResourcesCriteria == ListProjectResourcesCriteria.SkipProjectResources) {
+                    scc.addOr("domainPath", SearchCriteria.Op.LIKE, _domainDao.findById(caller.getDomainId()).getPath() + "%");
+                } else {
+                    if (!permittedAccounts.isEmpty()) {
+                        scc.addOr("accountId", SearchCriteria.Op.IN, permittedAccountIds.toArray());
+                        scc.addOr("sharedAccountId", SearchCriteria.Op.IN, permittedAccountIds.toArray());
+                    }
+                }
+                sc.addAnd("publicTemplate", SearchCriteria.Op.SC, scc);
             }
 
             // add tags criteria
@@ -3314,7 +3360,7 @@ public class QueryManagerImpl extends ManagerBase implements QueryService, Confi
         if (showRemovedTmpl) {
             uniqueTmplPair = _templateJoinDao.searchIncludingRemovedAndCount(sc, searchFilter);
         } else {
-            sc.addAnd("templateState", SearchCriteria.Op.IN, new State[]{State.Active, State.NotUploaded, State.UploadInProgress});
+            sc.addAnd("templateState", SearchCriteria.Op.IN, new State[]{State.Active, State.UploadAbandoned, State.UploadError, State.NotUploaded, State.UploadInProgress});
             uniqueTmplPair = _templateJoinDao.searchAndCount(sc, searchFilter);
         }
 
@@ -3386,7 +3432,8 @@ public class QueryManagerImpl extends ManagerBase implements QueryService, Confi
 
         return searchForTemplatesInternal(cmd.getId(), cmd.getIsoName(), cmd.getKeyword(), isoFilter, true,
                 cmd.isBootable(), cmd.getPageSizeVal(), cmd.getStartIndex(), cmd.getZoneId(), hypervisorType, true,
-                cmd.listInReadyState(), permittedAccounts, caller, listProjectResourcesCriteria, tags, showRemovedISO);
+                cmd.listInReadyState(), permittedAccounts, caller, listProjectResourcesCriteria, tags, showRemovedISO,
+                null);
     }
 
     @Override

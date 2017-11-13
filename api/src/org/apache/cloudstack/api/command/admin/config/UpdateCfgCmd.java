@@ -16,9 +16,11 @@
 // under the License.
 package org.apache.cloudstack.api.command.admin.config;
 
+import com.google.common.base.Strings;
+import org.apache.cloudstack.acl.RoleService;
 import org.apache.log4j.Logger;
-
 import org.apache.cloudstack.api.APICommand;
+import org.apache.cloudstack.api.ApiArgValidator;
 import org.apache.cloudstack.api.ApiConstants;
 import org.apache.cloudstack.api.ApiErrorCode;
 import org.apache.cloudstack.api.BaseCmd;
@@ -27,6 +29,7 @@ import org.apache.cloudstack.api.ServerApiException;
 import org.apache.cloudstack.api.response.AccountResponse;
 import org.apache.cloudstack.api.response.ClusterResponse;
 import org.apache.cloudstack.api.response.ConfigurationResponse;
+import org.apache.cloudstack.api.response.ImageStoreResponse;
 import org.apache.cloudstack.api.response.StoragePoolResponse;
 import org.apache.cloudstack.api.response.ZoneResponse;
 import org.apache.cloudstack.config.Configuration;
@@ -73,12 +76,23 @@ public class UpdateCfgCmd extends BaseCmd {
                description = "the ID of the Account to update the parameter value for corresponding account")
     private Long accountId;
 
+    @Parameter(name = ApiConstants.IMAGE_STORE_UUID,
+            type = CommandType.UUID,
+            entityType = ImageStoreResponse.class,
+            description = "the ID of the Image Store to update the parameter value for corresponding image store",
+            validations = ApiArgValidator.PositiveNumber)
+    private Long imageStoreId;
+
     /////////////////////////////////////////////////////
     /////////////////// Accessors ///////////////////////
     /////////////////////////////////////////////////////
 
     public String getCfgName() {
         return cfgName;
+    }
+
+    public void setCfgName(final String cfgName) {
+        this.cfgName = cfgName;
     }
 
     public String getValue() {
@@ -101,6 +115,10 @@ public class UpdateCfgCmd extends BaseCmd {
         return accountId;
     }
 
+    public Long getImageStoreId() {
+        return imageStoreId;
+    }
+
     /////////////////////////////////////////////////////
     /////////////// API Implementation///////////////////
     /////////////////////////////////////////////////////
@@ -117,6 +135,12 @@ public class UpdateCfgCmd extends BaseCmd {
 
     @Override
     public void execute() {
+        if (Strings.isNullOrEmpty(getCfgName())) {
+            throw new ServerApiException(ApiErrorCode.PARAM_ERROR, "Empty configuration name provided");
+        }
+        if (getCfgName().equalsIgnoreCase(RoleService.EnableDynamicApiChecker.key())) {
+            throw new ServerApiException(ApiErrorCode.PARAM_ERROR, "Restricted configuration update not allowed");
+        }
         Configuration cfg = _configService.updateConfiguration(this);
         if (cfg != null) {
             ConfigurationResponse response = _responseGenerator.createConfigurationResponse(cfg);

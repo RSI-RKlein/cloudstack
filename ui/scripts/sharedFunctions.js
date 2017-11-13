@@ -932,7 +932,6 @@ cloudStack.preFilter = {
                 args.$form.find('.form-item[rel=isPublic]').hide();
             }
             args.$form.find('.form-item[rel=isFeatured]').hide();
-            args.$form.find('.form-item[rel=xenserverToolsVersion61plus]').hide();
         }
     },
     addLoadBalancerDevice: function(args) { //add netscaler device OR add F5 device
@@ -1112,6 +1111,17 @@ cloudStack.converters = {
             return "Domain-Admin";
         }
     },
+    toAccountType: function(roleType) {
+        if (roleType == 'User') {
+            return 0;
+        } else if (roleType == 'Admin') {
+            return 1;
+        } else if (roleType == 'DomainAdmin') {
+            return 2;
+        } else if (roleType == 'ResourceAdmin') {
+            return 3;
+        }
+    },
     toAlertType: function(alertCode) {
         switch (alertCode) {
             case 0:
@@ -1215,6 +1225,8 @@ cloudStack.converters = {
                 return _l('label.secondary.storage.vm');
             case 19:
                 return _l('label.gpu');
+            case 90:
+                return _l('label.num.cpu.cores');
         }
     },
 
@@ -2307,7 +2319,7 @@ $.validator.addMethod("ipv6cidr", function(value, element) {
     if (parts[1] != Number(parts[1]).toString()) //making sure that "", " ", "00", "0 ","2  ", etc. will not pass
         return false;
 
-    if (Number(parts[1]) < 0 || Number(parts[1] > 32))
+    if (Number(parts[1]) < 0 || Number(parts[1] > 128))
         return false;
 
     return true;
@@ -2333,3 +2345,23 @@ $.validator.addMethod("ipv4cidr", function(value, element) {
 
     return true;
 }, "The specified IPv4 CIDR is invalid.");
+
+$.validator.addMethod("ipv46cidr", function(value, element) {
+    if (this.optional(element) && value.length == 0)
+        return true;
+
+    if ($.validator.methods.ipv4cidr.call(this, value, element) || $.validator.methods.ipv6cidr.call(this, value, element))
+        return true;
+
+    return false;
+}, "The specified IPv4/IPv6 CIDR is invalid.");
+
+
+$.validator.addMethod("allzonesonly", function(value, element){
+
+    if ((value.indexOf("-1") != -1) &&(value.length > 1))
+        return false;
+    return true;
+
+},
+"All Zones cannot be combined with any other zone");

@@ -67,7 +67,7 @@ public class NetworkVO implements Network {
     String name;
 
     @Column(name = "display_text")
-    String displayText;;
+    String displayText;
 
     @Column(name = "broadcast_uri")
     URI broadcastUri;
@@ -104,7 +104,7 @@ public class NetworkVO implements Network {
     State state;
 
     @Column(name = "redundant")
-    boolean isRedundant;
+    boolean redundant;
 
     @Column(name = "dns1")
     String dns1;
@@ -205,7 +205,7 @@ public class NetworkVO implements Network {
         this.networkOfferingId = networkOfferingId;
         this.dataCenterId = dataCenterId;
         this.physicalNetworkId = physicalNetworkId;
-        this.isRedundant = isRedundant;
+        this.redundant = isRedundant;
         if (state == null) {
             this.state = State.Allocated;
         } else {
@@ -299,14 +299,18 @@ public class NetworkVO implements Network {
         return state;
     }
 
-    @Override
-    public boolean isRedundant() {
-        return this.isRedundant;
-    }
-
     // don't use this directly when possible, use Network state machine instead
     public void setState(State state) {
         this.state = state;
+    }
+
+    @Override
+    public boolean isRedundant() {
+        return this.redundant;
+    }
+
+    public void setRedundant(boolean redundant) {
+        this.redundant = redundant;
     }
 
     @Override
@@ -630,9 +634,4 @@ public class NetworkVO implements Network {
     public void setVpcId(Long vpcId) {
         this.vpcId = vpcId;
     }
-
-    public void setIsReduntant(boolean reduntant) {
-        this.isRedundant = reduntant;
-    }
-
 }

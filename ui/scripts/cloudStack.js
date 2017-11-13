@@ -22,7 +22,7 @@
             var sections = [];
 
             if (isAdmin()) {
-                sections = ["dashboard", "instances", "storage", "network", "templates", "accounts", "domains", "events", "system", "global-settings", "configuration", "projects", "regions", "affinityGroups"];
+                sections = ["dashboard", "instances", "storage", "network", "templates", "roles", "accounts", "domains", "events", "system", "global-settings", "configuration", "projects", "regions", "affinityGroups"];
             } else if (isDomainAdmin()) {
                 sections = ["dashboard", "instances", "storage", "network", "templates", "accounts", "domains", "events", "projects", "configuration", "regions", "affinityGroups"];
             } else if (g_userProjectsEnabled) {
@@ -52,6 +52,7 @@
             templates: {},
             events: {},
             projects: {},
+            roles: {},
             accounts: {},
 
             domains: {}, //domain-admin and root-admin only
@@ -119,6 +120,7 @@
                     g_username = unBoxCookieValue('username');
                     g_userfullname = unBoxCookieValue('userfullname');
                     g_timezone = unBoxCookieValue('timezone');
+                    g_timezoneoffset = unBoxCookieValue('timezoneoffset');
                 } else { //single-sign-on (bypass login screen)
                     g_sessionKey = encodeURIComponent(g_loginResponse.sessionkey);
                     g_role = g_loginResponse.type;
@@ -128,6 +130,7 @@
                     g_domainid = g_loginResponse.domainid;
                     g_userfullname = g_loginResponse.firstname + ' ' + g_loginResponse.lastname;
                     g_timezone = g_loginResponse.timezone;
+                    g_timezoneoffset = g_loginResponse.timezoneoffset;
                 }
 
                 var userValid = false;
@@ -181,7 +184,7 @@
                         }
                     },
                     error: function(xhr) { // ignore any errors, fallback to the default
-                    },
+                    }
                 });
 
 
@@ -213,8 +216,6 @@
                         domainid: g_domainid
                     }
                 } : false;
-
-                return testAddUser;
             },
 
             // Actual login process, via form
@@ -259,6 +260,7 @@
                         g_account = loginresponse.account;
                         g_domainid = loginresponse.domainid;
                         g_timezone = loginresponse.timezone;
+                        g_timezoneoffset = loginresponse.timezoneoffset;
                         g_userfullname = loginresponse.firstname + ' ' + loginresponse.lastname;
 
                         $.cookie('username', g_username, {
@@ -274,6 +276,9 @@
                             expires: 1
                         });
                         $.cookie('timezone', g_timezone, {
+                            expires: 1
+                        });
+                        $.cookie('timezoneoffset', g_timezoneoffset, {
                             expires: 1
                         });
                         $.cookie('userfullname', g_userfullname, {

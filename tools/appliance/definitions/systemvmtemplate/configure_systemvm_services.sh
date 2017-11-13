@@ -37,7 +37,6 @@ function install_cloud_scripts() {
   chmod +x /opt/cloud/bin/* \
     /root/{clearUsageRules.sh,reconfigLB.sh,monitorServices.py} \
     /etc/init.d/{cloud,cloud-early-config,cloud-passwd-srvr,postinit} \
-    /etc/cron.daily/cloud-cleanup \
     /etc/profile.d/cloud.sh
 
   chkconfig --add cloud-early-config
@@ -53,6 +52,11 @@ function do_signature() {
   (cd ./cloud_scripts/; tar -cvf - * | gzip > /usr/share/cloud/cloud-scripts.tgz)
   md5sum /usr/share/cloud/cloud-scripts.tgz | awk '{print $1}' > /var/cache/cloud/cloud-scripts-signature
   echo "Cloudstack Release $CLOUDSTACK_RELEASE $(date)" > /etc/cloudstack-release
+}
+
+function configure_strongswan() {
+  # change the charon stroke timeout from 3 minutes to 30 seconds
+  sed -i "s/# timeout = 0/timeout = 30000/" /etc/strongswan.d/charon/stroke.conf
 }
 
 function configure_services() {
@@ -82,6 +86,7 @@ function configure_services() {
   chkconfig radvd off
 
   configure_apache2
+  configure_strongswan
 }
 
 return 2>/dev/null || configure_services

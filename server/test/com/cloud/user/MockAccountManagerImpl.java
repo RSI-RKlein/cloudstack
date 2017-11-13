@@ -22,6 +22,8 @@ import java.net.InetAddress;
 
 import javax.naming.ConfigurationException;
 
+import org.apache.cloudstack.api.command.admin.user.GetUserKeysCmd;
+import org.apache.cloudstack.framework.config.ConfigKey;
 import org.springframework.stereotype.Component;
 
 import org.apache.cloudstack.acl.ControlledEntity;
@@ -328,13 +330,13 @@ public class MockAccountManagerImpl extends ManagerBase implements Manager, Acco
 
     @Override
     public UserAccount createUserAccount(String userName, String password, String firstName, String lastName, String email, String timezone, String accountName,
-        short accountType, Long domainId, String networkDomain, Map<String, String> details, String accountUUID, String userUUID) {
+        short accountType, Long roleId, Long domainId, String networkDomain, Map<String, String> details, String accountUUID, String userUUID) {
         // TODO Auto-generated method stub
         return null;
     }
 
     @Override
-    public UserAccount createUserAccount(String userName, String password, String firstName, String lastName, String email, String timezone, String accountName, short accountType,
+    public UserAccount createUserAccount(String userName, String password, String firstName, String lastName, String email, String timezone, String accountName, short accountType, Long roleId,
                                          Long domainId, String networkDomain, Map<String, String> details, String accountUUID, String userUUID, User.Source source) {
         // TODO Auto-generated method stub
         return null;
@@ -366,7 +368,7 @@ public class MockAccountManagerImpl extends ManagerBase implements Manager, Acco
     }
 
     @Override
-    public Account createAccount(String accountName, short accountType, Long domainId, String networkDomain, Map<String, String> details, String uuid) {
+    public Account createAccount(String accountName, short accountType, Long roleId, Long domainId, String networkDomain, Map<String, String> details, String uuid) {
         // TODO Auto-generated method stub
         return null;
     }
@@ -401,5 +403,24 @@ public class MockAccountManagerImpl extends ManagerBase implements Manager, Acco
         return null;
     }
 
+    @Override
+    public Map<String, String> getKeys(GetUserKeysCmd cmd) {
+        return null;
+    }
+
+    @Override
+    public void checkAccess(User user, ControlledEntity entity)
+        throws PermissionDeniedException {
+
+    }
+    @Override
+    public String getConfigComponentName() {
+        return null;
+    }
+
+    @Override
+    public ConfigKey<?>[] getConfigKeys() {
+        return null;
+    }
 
 }

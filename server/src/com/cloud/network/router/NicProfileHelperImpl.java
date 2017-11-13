@@ -63,6 +63,7 @@ public class NicProfileHelperImpl implements NicProfileHelper {
     @DB
     public NicProfile createPrivateNicProfileForGateway(final VpcGateway privateGateway, final VirtualRouter router) {
         final Network privateNetwork = _networkModel.getNetwork(privateGateway.getNetworkId());
+
         PrivateIpVO ipVO = _privateIpDao.allocateIpAddress(privateNetwork.getDataCenterId(), privateNetwork.getId(), privateGateway.getIp4Address());
 
         final Long vpcId = privateGateway.getVpcId();
@@ -71,7 +72,11 @@ public class NicProfileHelperImpl implements NicProfileHelper {
             ipVO = _privateIpDao.findByIpAndVpcId(vpcId, privateGateway.getIp4Address());
         }
 
-        final Nic privateNic = _nicDao.findByIp4AddressAndNetworkId(ipVO.getIpAddress(), privateNetwork.getId());
+        Nic privateNic = null;
+
+        if (ipVO != null) {
+            privateNic = _nicDao.findByIp4AddressAndNetworkId(ipVO.getIpAddress(), privateNetwork.getId());
+        }
 
         NicProfile privateNicProfile = new NicProfile();
 
@@ -80,11 +85,16 @@ public class NicProfileHelperImpl implements NicProfileHelper {
                     new NicProfile(privateNic, privateNetwork, privateNic.getBroadcastUri(), privateNic.getIsolationUri(), _networkModel.getNetworkRate(
                             privateNetwork.getId(), router.getId()), _networkModel.isSecurityGroupSupportedInNetwork(privateNetwork), _networkModel.getNetworkTag(
                                     router.getHypervisorType(), privateNetwork));
+
+            if (router.getIsRedundantRouter()) {
+              String newMacAddress = NetUtils.long2Mac(NetUtils.createSequenceBasedMacAddress(ipVO.getMacAddress(), NetworkModel.MACIdentifier.value()));
+              privateNicProfile.setMacAddress(newMacAddress);
+            }
         } else {
             final String netmask = NetUtils.getCidrNetmask(privateNetwork.getCidr());
             final PrivateIpAddress ip =
                     new PrivateIpAddress(ipVO, privateNetwork.getBroadcastUri().toString(), privateNetwork.getGateway(), netmask,
-                            NetUtils.long2Mac(NetUtils.createSequenceBasedMacAddress(ipVO.getMacAddress())));
+                            NetUtils.long2Mac(NetUtils.createSequenceBasedMacAddress(ipVO.getMacAddress(), NetworkModel.MACIdentifier.value())));
 
             final URI netUri = BroadcastDomainType.fromString(ip.getBroadcastUri());
             privateNicProfile.setIPv4Address(ip.getIpAddress());
@@ -117,7 +127,7 @@ public class NicProfileHelperImpl implements NicProfileHelper {
         guestNic.setBroadcastType(guestNetwork.getBroadcastDomainType());
         guestNic.setIsolationUri(guestNetwork.getBroadcastUri());
         guestNic.setMode(guestNetwork.getMode());
-        final String gatewayCidr = guestNetwork.getCidr();
+        final String gatewayCidr = _networkModel.getValidNetworkCidr(guestNetwork);
         guestNic.setIPv4Netmask(NetUtils.getCidrNetmask(gatewayCidr));
 
         return guestNic;

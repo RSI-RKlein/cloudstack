@@ -22,6 +22,7 @@ import java.util.UUID;
 
 import javax.inject.Inject;
 
+import org.apache.cloudstack.engine.orchestration.service.NetworkOrchestrationService;
 import org.apache.log4j.Logger;
 
 import com.cloud.agent.api.Command;
@@ -29,15 +30,16 @@ import com.cloud.agent.api.to.DiskTO;
 import com.cloud.agent.api.to.NicTO;
 import com.cloud.agent.api.to.VirtualMachineTO;
 import com.cloud.gpu.GPU;
+import com.cloud.network.Networks.BroadcastDomainType;
 import com.cloud.network.dao.NetworkDao;
 import com.cloud.network.dao.NetworkVO;
+import com.cloud.offering.NetworkOffering;
 import com.cloud.offering.ServiceOffering;
+import com.cloud.offerings.dao.NetworkOfferingDetailsDao;
 import com.cloud.resource.ResourceManager;
-import com.cloud.server.ConfigurationServer;
 import com.cloud.service.ServiceOfferingDetailsVO;
 import com.cloud.service.dao.ServiceOfferingDao;
 import com.cloud.service.dao.ServiceOfferingDetailsDao;
-import com.cloud.storage.dao.VMTemplateDetailsDao;
 import com.cloud.utils.Pair;
 import com.cloud.utils.component.AdapterBase;
 import com.cloud.vm.NicProfile;
@@ -55,29 +57,23 @@ public abstract class HypervisorGuruBase extends AdapterBase implements Hypervis
     public static final Logger s_logger = Logger.getLogger(HypervisorGuruBase.class);
 
     @Inject
-    VMTemplateDetailsDao _templateDetailsDao;
+    private NicDao _nicDao;
     @Inject
-    NicDao _nicDao;
+    private NetworkDao _networkDao;
     @Inject
-    NetworkDao  _networkDao;
+    private NetworkOfferingDetailsDao networkOfferingDetailsDao;
     @Inject
-    VMInstanceDao _virtualMachineDao;
+    private VMInstanceDao _virtualMachineDao;
     @Inject
-    UserVmDetailsDao _userVmDetailsDao;
+    private UserVmDetailsDao _userVmDetailsDao;
     @Inject
-    NicSecondaryIpDao _nicSecIpDao;
+    private NicSecondaryIpDao _nicSecIpDao;
     @Inject
-    ConfigurationServer _configServer;
+    private ResourceManager _resourceMgr;
     @Inject
-    ResourceManager _resourceMgr;
+    private ServiceOfferingDetailsDao _serviceOfferingDetailsDao;
     @Inject
-    ServiceOfferingDetailsDao _serviceOfferingDetailsDao;
-    @Inject
-    ServiceOfferingDao _serviceOfferingDao;
-
-    protected HypervisorGuruBase() {
-        super();
-    }
+    private ServiceOfferingDao _serviceOfferingDao;
 
     @Override
     public NicTO toNicTO(NicProfile profile) {
@@ -97,6 +93,8 @@ public abstract class HypervisorGuruBase extends AdapterBase implements Hypervis
         to.setNetworkRateMbps(profile.getNetworkRate());
         to.setName(profile.getName());
         to.setSecurityGroupEnabled(profile.isSecurityGroupEnabled());
+        to.setIp6Address(profile.getIPv6Address());
+        to.setIp6Cidr(profile.getIPv6Cidr());
 
         NetworkVO network = _networkDao.findById(profile.getNetworkId());
         to.setNetworkUuid(network.getUuid());
@@ -142,7 +140,21 @@ public abstract class HypervisorGuruBase extends AdapterBase implements Hypervis
         NicTO[] nics = new NicTO[nicProfiles.size()];
         int i = 0;
         for (NicProfile nicProfile : nicProfiles) {
-            nics[i++] = toNicTO(nicProfile);
+            if(vm.getType() == VirtualMachine.Type.NetScalerVm) {
+                nicProfile.setBroadcastType(BroadcastDomainType.Native);
+            }
+            NicTO nicTo = toNicTO(nicProfile);
+            final NetworkVO network = _networkDao.findByUuid(nicTo.getNetworkUuid());
+            if (network != null) {
+                final Map<NetworkOffering.Detail, String> details = networkOfferingDetailsDao.getNtwkOffDetails(network.getNetworkOfferingId());
+                if (details != null) {
+                    details.putIfAbsent(NetworkOffering.Detail.PromiscuousMode, NetworkOrchestrationService.PromiscuousMode.value().toString());
+                    details.putIfAbsent(NetworkOffering.Detail.MacAddressChanges, NetworkOrchestrationService.MacAddressChanges.value().toString());
+                    details.putIfAbsent(NetworkOffering.Detail.ForgedTransmits, NetworkOrchestrationService.ForgedTransmits.value().toString());
+                }
+                nicTo.setDetails(details);
+            }
+            nics[i++] = nicTo;
         }
 
         to.setNics(nics);

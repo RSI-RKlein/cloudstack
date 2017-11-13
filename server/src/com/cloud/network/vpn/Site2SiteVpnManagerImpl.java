@@ -177,8 +177,8 @@ public class Site2SiteVpnManagerImpl extends ManagerBase implements Site2SiteVpn
 
         String name = cmd.getName();
         String gatewayIp = cmd.getGatewayIp();
-        if (!NetUtils.isValidIp(gatewayIp)) {
-            throw new InvalidParameterValueException("The customer gateway ip " + gatewayIp + " is invalid!");
+        if (!NetUtils.isValidIp(gatewayIp) && !NetUtils.verifyDomainName(gatewayIp)) {
+            throw new InvalidParameterValueException("The customer gateway ip/Domain " + gatewayIp + " is invalid!");
         }
         if (name == null) {
             name = "VPN-" + gatewayIp;
@@ -190,10 +190,10 @@ public class Site2SiteVpnManagerImpl extends ManagerBase implements Site2SiteVpn
         String ipsecPsk = cmd.getIpsecPsk();
         String ikePolicy = cmd.getIkePolicy();
         String espPolicy = cmd.getEspPolicy();
-        if (!NetUtils.isValidS2SVpnPolicy(ikePolicy)) {
-            throw new InvalidParameterValueException("The customer gateway IKE policy " + ikePolicy + " is invalid!");
+        if (!NetUtils.isValidS2SVpnPolicy("ike", ikePolicy)) {
+            throw new InvalidParameterValueException("The customer gateway IKE policy " + ikePolicy + " is invalid!  Verify the required Diffie Hellman (DH) group is specified.");
         }
-        if (!NetUtils.isValidS2SVpnPolicy(espPolicy)) {
+        if (!NetUtils.isValidS2SVpnPolicy("esp", espPolicy)) {
             throw new InvalidParameterValueException("The customer gateway ESP policy " + espPolicy + " is invalid!");
         }
         Long ikeLifetime = cmd.getIkeLifetime();
@@ -218,6 +218,11 @@ public class Site2SiteVpnManagerImpl extends ManagerBase implements Site2SiteVpn
             dpd = false;
         }
 
+        Boolean encap = cmd.getEncap();
+        if (encap == null) {
+            encap = false;
+        }
+
         long accountId = owner.getAccountId();
         if (_customerGatewayDao.findByGatewayIpAndAccountId(gatewayIp, accountId) != null) {
             throw new InvalidParameterValueException("The customer gateway with ip " + gatewayIp + " already existed in the system!");
@@ -229,7 +234,7 @@ public class Site2SiteVpnManagerImpl extends ManagerBase implements Site2SiteVpn
         checkCustomerGatewayCidrList(peerCidrList);
 
         Site2SiteCustomerGatewayVO gw =
-            new Site2SiteCustomerGatewayVO(name, accountId, owner.getDomainId(), gatewayIp, peerCidrList, ipsecPsk, ikePolicy, espPolicy, ikeLifetime, espLifetime, dpd);
+            new Site2SiteCustomerGatewayVO(name, accountId, owner.getDomainId(), gatewayIp, peerCidrList, ipsecPsk, ikePolicy, espPolicy, ikeLifetime, espLifetime, dpd, encap);
         _customerGatewayDao.persist(gw);
         return gw;
     }
@@ -426,23 +431,23 @@ public class Site2SiteVpnManagerImpl extends ManagerBase implements Site2SiteVpn
         }
         String name = cmd.getName();
         String gatewayIp = cmd.getGatewayIp();
-        if (!NetUtils.isValidIp(gatewayIp)) {
-            throw new InvalidParameterValueException("The customer gateway ip " + gatewayIp + " is invalid!");
+        if (!NetUtils.isValidIp(gatewayIp) && !NetUtils.verifyDomainName(gatewayIp)) {
+            throw new InvalidParameterValueException("The customer gateway ip/Domain " + gatewayIp + " is invalid!");
         }
         if (name == null) {
             name = "VPN-" + gatewayIp;
         }
         String guestCidrList = cmd.getGuestCidrList();
-        if (!NetUtils.validateGuestCidrList(guestCidrList)) {
-            throw new InvalidParameterValueException("The customer gateway guest cidr list " + guestCidrList + " contains invalid guest cidr!");
+        if (!NetUtils.isValidCidrList(guestCidrList)) {
+            throw new InvalidParameterValueException("The customer gateway peer cidr list " + guestCidrList + " contains an invalid cidr!");
         }
         String ipsecPsk = cmd.getIpsecPsk();
         String ikePolicy = cmd.getIkePolicy();
         String espPolicy = cmd.getEspPolicy();
-        if (!NetUtils.isValidS2SVpnPolicy(ikePolicy)) {
-            throw new InvalidParameterValueException("The customer gateway IKE policy" + ikePolicy + " is invalid!");
+        if (!NetUtils.isValidS2SVpnPolicy("ike", ikePolicy)) {
+            throw new InvalidParameterValueException("The customer gateway IKE policy" + ikePolicy + " is invalid!  Verify the required Diffie Hellman (DH) group is specified.");
         }
-        if (!NetUtils.isValidS2SVpnPolicy(espPolicy)) {
+        if (!NetUtils.isValidS2SVpnPolicy("esp", espPolicy)) {
             throw new InvalidParameterValueException("The customer gateway ESP policy" + espPolicy + " is invalid!");
         }
         Long ikeLifetime = cmd.getIkeLifetime();
@@ -467,6 +472,11 @@ public class Site2SiteVpnManagerImpl extends ManagerBase implements Site2SiteVpn
             dpd = false;
         }
 
+        Boolean encap = cmd.getEncap();
+        if (encap == null) {
+            encap = false;
+        }
+
         checkCustomerGatewayCidrList(guestCidrList);
 
         long accountId = gw.getAccountId();
@@ -488,6 +498,7 @@ public class Site2SiteVpnManagerImpl extends ManagerBase implements Site2SiteVpn
         gw.setIkeLifetime(ikeLifetime);
         gw.setEspLifetime(espLifetime);
         gw.setDpd(dpd);
+        gw.setEncap(encap);
         _customerGatewayDao.persist(gw);
         return gw;
     }
@@ -506,7 +517,7 @@ public class Site2SiteVpnManagerImpl extends ManagerBase implements Site2SiteVpn
 
         _accountMgr.checkAccess(caller, null, false, conn);
 
-        if (conn.getState() == State.Connected) {
+        if (conn.getState() != State.Pending) {
             stopVpnConnection(id);
         }
         _vpnConnectionDao.remove(id);
@@ -520,8 +531,8 @@ public class Site2SiteVpnManagerImpl extends ManagerBase implements Site2SiteVpn
             throw new CloudRuntimeException("Unable to acquire lock on " + conn);
         }
         try {
-            if (conn.getState() != State.Connected && conn.getState() != State.Error) {
-                throw new InvalidParameterValueException("Site to site VPN connection with specified id is not in correct state(connected) to process disconnect!");
+            if (conn.getState() == State.Pending) {
+                throw new InvalidParameterValueException("Site to site VPN connection with specified id is currently Pending, unable to Disconnect!");
             }
 
             conn.setState(State.Disconnected);
@@ -575,6 +586,7 @@ public class Site2SiteVpnManagerImpl extends ManagerBase implements Site2SiteVpn
         boolean listAll = cmd.listAll();
         long startIndex = cmd.getStartIndex();
         long pageSizeVal = cmd.getPageSizeVal();
+        String keyword = cmd.getKeyword();
 
         Account caller = CallContext.current().getCallingAccount();
         List<Long> permittedAccounts = new ArrayList<Long>();
@@ -591,12 +603,17 @@ public class Site2SiteVpnManagerImpl extends ManagerBase implements Site2SiteVpn
         _accountMgr.buildACLSearchBuilder(sb, domainId, isRecursive, permittedAccounts, listProjectResourcesCriteria);
 
         sb.and("id", sb.entity().getId(), SearchCriteria.Op.EQ);
+        sb.and("name", sb.entity().getName(), SearchCriteria.Op.LIKE);
 
         SearchCriteria<Site2SiteCustomerGatewayVO> sc = sb.create();
         _accountMgr.buildACLSearchCriteria(sc, domainId, isRecursive, permittedAccounts, listProjectResourcesCriteria);
 
         if (id != null) {
-            sc.addAnd("id", SearchCriteria.Op.EQ, id);
+            sc.setParameters("id", id);
+        }
+        if(keyword != null && !keyword.isEmpty())
+        {
+            sc.setParameters("name", "%" + keyword + "%");
         }
 
         Pair<List<Site2SiteCustomerGatewayVO>, Integer> result = _customerGatewayDao.searchAndCount(sc, searchFilter);

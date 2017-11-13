@@ -27,7 +27,7 @@
 user=root
 
 # Add your DHCP lease folders here
-DHCP_FOLDERS="/var/lib/dhclient/* /var/lib/dhcp3/*"
+DHCP_FOLDERS="/var/lib/dhclient/* /var/lib/dhcp3/* /var/lib/dhcp/*"
 keys_received=0
 file_count=0
 
@@ -49,7 +49,7 @@ if [ -z "$SSHKEY_SERVER_IP" ]; then
      logger -t "cloud" "Unable to determine the password server, falling back to data-server"
      SSHKEY_SERVER_IP=data-server
 fi
- 
+
 logger -t "cloud" "Sending request to ssh key server at $SSHKEY_SERVER_IP"
 publickey=$(wget -q -t 3 -T 20 -O - http://$SSHKEY_SERVER_IP/latest/public-keys)
 if [ $? -eq 0 ]; then
@@ -67,7 +67,7 @@ if [ -z "$publickey" ]; then
     exit 1
 fi
 
-homedir=$(grep ^$user /etc/passwd|awk -F ":" '{print $6}')
+homedir=$(getent passwd $user|awk -F ":" '{print $6}')
 sshdir=$homedir/.ssh
 authorized=$sshdir/authorized_keys
 
@@ -81,8 +81,8 @@ if [ ! -e $authorized ]; then
     chmod 600 $authorized
 fi
 
-cat $authorized|grep -v "$publickey"|tee $authorized > /dev/null
-echo "$publickey" >> $authorized
+sed -i "/ cloudstack@apache.org$/d" $authorized
+echo "$publickey cloudstack@apache.org" >> $authorized
 
 which restorecon && restorecon -R -v $sshdir
 

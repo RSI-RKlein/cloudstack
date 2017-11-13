@@ -59,6 +59,7 @@ ENABLE = "Enable"
 DISABLE = "Disable"
 NETWORK_OFFERING = "network_offering"
 ROOT = "ROOT"
+DATA = "DATA"
 INVALID_INPUT = "INVALID INPUT"
 EMPTY_LIST = "EMPTY_LIST"
 FAIL = 0
@@ -114,6 +115,31 @@ CHILD_DOMAIN_ADMIN="child domain admin"
 Network states
 '''
 ALLOCATED = "Allocated"
+
+'''
+Host states
+'''
+HOST_CREATING = "Creating"
+HOST_CONNECTING = "Connecting"
+HOST_UP = "Up"
+HOST_DOWN = "Down"
+HOST_DISCONNECTED = "Disconnected"
+HOST_ALERT = "Alert"
+HOST_REMOVED = "Removed"
+HOST_ERROR = "Error"
+HOST_REBALANCING = "Rebalancing"
+HOST_UNKNOWN = "Unknown"
+
+'''
+Host resource states
+'''
+HOST_RS_CREATING = "Creating"
+HOST_RS_ENABLED = "Enabled"
+HOST_RS_DISABLED = "Disabled"
+HOST_RS_PREPARE_FOR_MAINTENANCE = "PrepareForMaintenance"
+HOST_RS_ERROR_IN_MAINTENANCE = "ErrorInMaintenance"
+HOST_RS_MAINTENANCE = "Maintenance"
+HOST_RS_ERROR = "Error"
 
 '''
 Storage Tags

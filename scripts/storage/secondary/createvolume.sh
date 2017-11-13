@@ -27,7 +27,6 @@ usage() {
 
 
 #set -x
-ulimit -f 41943040 #40GiB in blocks
 ulimit -c 0
 
 rollback_if_needed() {
@@ -42,6 +41,7 @@ fi
 
 verify_cksum() {
   digestalgo=""
+# NOTE this will only work with 0-padded checksums
   case ${#1} in
         32) digestalgo="md5sum" ;;
         40) digestalgo="sha1sum" ;;

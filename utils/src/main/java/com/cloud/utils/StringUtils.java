@@ -21,10 +21,12 @@ package com.cloud.utils;
 
 import java.nio.charset.Charset;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -296,8 +298,8 @@ public class StringUtils {
     public static <T> List<T> applyPagination(final List<T> originalList, final Long startIndex, final Long pageSizeVal) {
         // Most likely pageSize will never exceed int value, and we need integer to partition the listToReturn
         final boolean applyPagination = startIndex != null && pageSizeVal != null
-                && startIndex <= Integer.MAX_VALUE && startIndex >= Integer.MIN_VALUE && pageSizeVal <= Integer.MAX_VALUE
-                && pageSizeVal >= Integer.MIN_VALUE;
+                && startIndex <= Integer.MAX_VALUE && startIndex >= 0 && pageSizeVal <= Integer.MAX_VALUE
+                && pageSizeVal > 0;
                 List<T> listWPagination = null;
                 if (applyPagination) {
                     listWPagination = new ArrayList<>();
@@ -319,5 +321,11 @@ public class StringUtils {
             listOfChunks.add(originalList.subList(originalList.size() - originalList.size() % chunkSize, originalList.size()));
         }
         return listOfChunks;
+    }
+
+    public static String shuffleCSVList(final String csvList) {
+        List<String> list = csvTagsToList(csvList);
+        Collections.shuffle(list, new Random(System.nanoTime()));
+        return join(list, ",");
     }
 }

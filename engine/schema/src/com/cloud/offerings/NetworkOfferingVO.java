@@ -142,6 +142,9 @@ public class NetworkOfferingVO implements NetworkOffering {
     @Column(name="supports_streched_l2")
     boolean supportsStrechedL2 = false;
 
+    @Column(name="supports_public_access")
+    boolean supportsPublicAccess = false;
+
     @Override
     public String getDisplayText() {
         return displayText;
@@ -152,6 +155,9 @@ public class NetworkOfferingVO implements NetworkOffering {
 
     @Column(name = "public_lb")
     boolean publicLb;
+
+    @Column(name="service_package_id")
+    String servicePackageUuid = null;
 
     @Override
     public boolean isKeepAliveEnabled() {
@@ -334,7 +340,7 @@ public class NetworkOfferingVO implements NetworkOffering {
     public NetworkOfferingVO(String name, String displayText, TrafficType trafficType, boolean systemOnly, boolean specifyVlan, Integer rateMbps,
             Integer multicastRateMbps, boolean isDefault, Availability availability, String tags, Network.GuestType guestType, boolean conserveMode, boolean dedicatedLb,
             boolean sharedSourceNat, boolean redundantRouter, boolean elasticIp, boolean elasticLb, boolean specifyIpRanges, boolean inline, boolean isPersistent,
-            boolean associatePublicIP, boolean publicLb, boolean internalLb, boolean egressdefaultpolicy, boolean supportsStrechedL2) {
+            boolean associatePublicIP, boolean publicLb, boolean internalLb, boolean egressdefaultpolicy, boolean supportsStrechedL2, boolean supportsPublicAccess) {
         this(name,
             displayText,
             trafficType,
@@ -360,6 +366,7 @@ public class NetworkOfferingVO implements NetworkOffering {
         this.eipAssociatePublicIp = associatePublicIP;
         this.egressdefaultpolicy = egressdefaultpolicy;
         this.supportsStrechedL2 = supportsStrechedL2;
+        this.supportsPublicAccess = supportsPublicAccess;
     }
 
     public NetworkOfferingVO() {
@@ -494,5 +501,19 @@ public class NetworkOfferingVO implements NetworkOffering {
     @Override
     public boolean getSupportsStrechedL2() {
         return supportsStrechedL2;
+    }
+
+    public void  setServicePackage(String servicePackageUuid) {
+        this.servicePackageUuid = servicePackageUuid;
+    }
+
+    @Override
+    public boolean getSupportsPublicAccess() {
+        return supportsPublicAccess;
+    }
+
+    @Override
+    public String getServicePackage() {
+        return servicePackageUuid;
     }
 }

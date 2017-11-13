@@ -661,7 +661,14 @@ public class VirtualMachineMO extends BaseMO {
     public boolean hasSnapshot() throws Exception {
         VirtualMachineSnapshotInfo info = getSnapshotInfo();
         if (info != null) {
-            return info.getCurrentSnapshot() != null;
+            ManagedObjectReference currentSnapshot = info.getCurrentSnapshot();
+            if (currentSnapshot != null) {
+                return true;
+            }
+            List<VirtualMachineSnapshotTree> rootSnapshotList = info.getRootSnapshotList();
+            if (rootSnapshotList != null && rootSnapshotList.size() > 0) {
+                return true;
+            }
         }
         return false;
     }
@@ -742,6 +749,13 @@ public class VirtualMachineMO extends BaseMO {
 
     public VirtualMachineConfigInfo getConfigInfo() throws Exception {
         return (VirtualMachineConfigInfo)_context.getVimClient().getDynamicProperty(_mor, "config");
+    }
+
+    public boolean isToolsInstallerMounted() throws Exception {
+        return _context.getVimClient().getDynamicProperty(_mor, "runtime.toolsInstallerMounted");
+    }
+    public GuestInfo getGuestInfo() throws Exception {
+        return (GuestInfo)_context.getVimClient().getDynamicProperty(_mor, "guest");
     }
 
     public VirtualMachineConfigSummary getConfigSummary() throws Exception {
@@ -2137,7 +2151,7 @@ public class VirtualMachineMO extends BaseMO {
         }
 
         assert (false);
-        throw new Exception(diskController + " Controller Not Found");
+        throw new IllegalStateException("Scsi disk controller of type " + diskController + " not found among configured devices.");
     }
 
     public int getScsiDiskControllerKeyNoException(String diskController) throws Exception {
@@ -2206,7 +2220,48 @@ public class VirtualMachineMO extends BaseMO {
 
         if(devices != null && devices.size() > 0) {
             for(VirtualDevice device : devices) {
-                if(device instanceof VirtualLsiLogicController) {
+                if(device instanceof VirtualSCSIController) {
+                    return device.getKey();
+                }
+            }
+        }
+
+        return -1;
+    }
+
+    public void ensureLsiLogicDeviceControllers(int count, int availableBusNum) throws Exception {
+        int scsiControllerKey = getLsiLogicDeviceControllerKeyNoException();
+        if (scsiControllerKey < 0) {
+            VirtualMachineConfigSpec vmConfig = new VirtualMachineConfigSpec();
+
+            int busNum = availableBusNum;
+            while (busNum < count) {
+                VirtualLsiLogicController scsiController = new VirtualLsiLogicController();
+                scsiController.setSharedBus(VirtualSCSISharing.NO_SHARING);
+                scsiController.setBusNumber(busNum);
+                scsiController.setKey(busNum - VmwareHelper.MAX_SCSI_CONTROLLER_COUNT);
+                VirtualDeviceConfigSpec scsiControllerSpec = new VirtualDeviceConfigSpec();
+                scsiControllerSpec.setDevice(scsiController);
+                scsiControllerSpec.setOperation(VirtualDeviceConfigSpecOperation.ADD);
+
+                vmConfig.getDeviceChange().add(scsiControllerSpec);
+                busNum++;
+            }
+            if (configureVm(vmConfig)) {
+                throw new Exception("Unable to add Lsi Logic controllers to the VM " + getName());
+            } else {
+                s_logger.info("Successfully added " + count + " LsiLogic Parallel SCSI controllers.");
+            }
+        }
+    }
+
+    private int getLsiLogicDeviceControllerKeyNoException() throws Exception {
+        List<VirtualDevice> devices = (List<VirtualDevice>)_context.getVimClient().
+                getDynamicProperty(_mor, "config.hardware.device");
+
+        if (devices != null && devices.size() > 0) {
+            for (VirtualDevice device : devices) {
+                if (device instanceof VirtualLsiLogicController) {
                     return device.getKey();
                 }
             }
@@ -2318,6 +2373,59 @@ public class VirtualMachineMO extends BaseMO {
         }
 
         s_logger.warn("Disk device info lookup for volume: " + vmdkDatastorePath + " failed as no matching disk device found");
+        return null;
+    }
+
+    // return pair of VirtualDisk and disk device bus name(ide0:0, etc)
+    public Pair<VirtualDisk, String> getDiskDevice(String vmdkDatastorePath, boolean matchExactly) throws Exception {
+        List<VirtualDevice> devices = _context.getVimClient().getDynamicProperty(_mor, "config.hardware.device");
+
+        DatastoreFile dsSrcFile = new DatastoreFile(vmdkDatastorePath);
+        String srcBaseName = dsSrcFile.getFileBaseName();
+        String trimmedSrcBaseName = VmwareHelper.trimSnapshotDeltaPostfix(srcBaseName);
+
+        if (matchExactly) {
+            s_logger.info("Look for disk device info from volume : " + vmdkDatastorePath + " with base name: " + srcBaseName);
+        } else {
+            s_logger.info("Look for disk device info from volume : " + vmdkDatastorePath + " with trimmed base name: " + trimmedSrcBaseName);
+        }
+
+        if (devices != null && devices.size() > 0) {
+            for (VirtualDevice device : devices) {
+                if (device instanceof VirtualDisk) {
+                    s_logger.info("Test against disk device, controller key: " + device.getControllerKey() + ", unit number: " + device.getUnitNumber());
+
+                    VirtualDeviceBackingInfo backingInfo = ((VirtualDisk)device).getBacking();
+                    if (backingInfo instanceof VirtualDiskFlatVer2BackingInfo) {
+                        VirtualDiskFlatVer2BackingInfo diskBackingInfo = (VirtualDiskFlatVer2BackingInfo)backingInfo;
+                        do {
+                            s_logger.info("Test against disk backing : " + diskBackingInfo.getFileName());
+
+                            DatastoreFile dsBackingFile = new DatastoreFile(diskBackingInfo.getFileName());
+                            String backingBaseName = dsBackingFile.getFileBaseName();
+                            if (matchExactly) {
+                                if (backingBaseName.equalsIgnoreCase(srcBaseName)) {
+                                    String deviceNumbering = getDeviceBusName(devices, device);
+
+                                    s_logger.info("Disk backing : " + diskBackingInfo.getFileName() + " matches ==> " + deviceNumbering);
+                                    return new Pair<VirtualDisk, String>((VirtualDisk)device, deviceNumbering);
+                                }
+                            } else {
+                                if (backingBaseName.contains(trimmedSrcBaseName)) {
+                                    String deviceNumbering = getDeviceBusName(devices, device);
+
+                                    s_logger.info("Disk backing : " + diskBackingInfo.getFileName() + " matches ==> " + deviceNumbering);
+                                    return new Pair<VirtualDisk, String>((VirtualDisk)device, deviceNumbering);
+                                }
+                            }
+
+                            diskBackingInfo = diskBackingInfo.getParent();
+                        } while (diskBackingInfo != null);
+                    }
+                }
+            }
+        }
+
         return null;
     }
 

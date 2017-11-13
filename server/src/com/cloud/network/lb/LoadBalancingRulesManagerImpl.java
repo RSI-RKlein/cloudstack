@@ -596,7 +596,7 @@ public class LoadBalancingRulesManagerImpl<Type> extends ManagerBase implements 
          */
         if (!validateHealthCheck(cmd)) {
             throw new InvalidParameterValueException(
-                "Failed to create HealthCheck policy: Validation Failed (HealthCheck Policy is not supported by LB Provider for the LB rule id :)" + cmd.getLbRuleId());
+                "Failed to create HealthCheck policy: Validation Failed (HealthCheck Policy is not supported by LB Provider for the LB rule id :" + cmd.getLbRuleId() + ")");
         }
 
         /* Validation : check for the multiple hc policies to the rule id */
@@ -875,13 +875,10 @@ public class LoadBalancingRulesManagerImpl<Type> extends ManagerBase implements 
                     for (LoadBalancerVO lb : rules) {
                         List<LbDestination> dstList = getExistingDestinations(lb.getId());
                         List<LbHealthCheckPolicy> hcPolicyList = getHealthCheckPolicies(lb.getId());
-                        // adding to lbrules list only if the LB rule
-                        // hashealtChecks
-                        if (hcPolicyList != null && hcPolicyList.size() > 0) {
-                            Ip sourceIp = getSourceIp(lb);
-                            LoadBalancingRule loadBalancing = new LoadBalancingRule(lb, dstList, null, hcPolicyList, sourceIp, null, lb.getLbProtocol());
-                            lbrules.add(loadBalancing);
-                        }
+                        // Now retrive the status of services from NS even there are no policies. because there is default monitor
+                        Ip sourceIp = getSourceIp(lb);
+                        LoadBalancingRule loadBalancing = new LoadBalancingRule(lb, dstList, null, hcPolicyList, sourceIp, null, lb.getLbProtocol());
+                        lbrules.add(loadBalancing);
                     }
                     if (lbrules.size() > 0) {
                         isHandled = false;
@@ -1796,8 +1793,24 @@ public class LoadBalancingRulesManagerImpl<Type> extends ManagerBase implements 
             // entries will be rollbacked.
             lbs = Arrays.asList(lb);
         } else {
+            boolean onlyRulesInTransitionState = true;
+            for (LoadBalancingServiceProvider lbElement : _lbProviders) {
+                Provider provider = lbElement.getProvider();
+                boolean isLbProvider = _networkModel.isProviderSupportServiceInNetwork(lb.getNetworkId(), Service.Lb, provider);
+                if (!isLbProvider) {
+                    continue;
+                }
+                onlyRulesInTransitionState = lbElement.handlesOnlyRulesInTransitionState();
+                break;
+            }
+
             // get all rules in transition state
-            lbs = _lbDao.listInTransitionStateByNetworkIdAndScheme(lb.getNetworkId(), lb.getScheme());
+            if (onlyRulesInTransitionState) {
+                lbs = _lbDao.listInTransitionStateByNetworkIdAndScheme(lb.getNetworkId(), lb.getScheme());
+            } else {
+                lbs = _lbDao.listByNetworkIdAndScheme(lb.getNetworkId(), lb.getScheme());
+            }
+
         }
         return applyLoadBalancerRules(lbs, true);
     }
@@ -1985,7 +1998,10 @@ public class LoadBalancingRulesManagerImpl<Type> extends ManagerBase implements 
 
     @Override
     public boolean removeAllLoadBalanacersForIp(long ipId, Account caller, long callerUserId) {
-        List<FirewallRuleVO> rules = _firewallDao.listByIpAndPurposeAndNotRevoked(ipId, Purpose.LoadBalancing);
+
+        //Included revoked rules to remove the rules of ips which are in revoke state
+        List<FirewallRuleVO> rules = _firewallDao.listByIpAndPurpose(ipId, Purpose.LoadBalancing);
+
         if (rules != null) {
             s_logger.debug("Found " + rules.size() + " lb rules to cleanup");
             for (FirewallRule rule : rules) {
@@ -2105,10 +2121,11 @@ public class LoadBalancingRulesManagerImpl<Type> extends ManagerBase implements 
             throw new InvalidParameterValueException("Modifications in lb rule " + lbRuleId + " are not supported.");
         }
 
+        LoadBalancerVO tmplbVo = _lbDao.findById(lbRuleId);
         boolean success = _lbDao.update(lbRuleId, lb);
 
         // If algorithm is changed, have to reapply the lb config
-        if (algorithm != null) {
+        if ((algorithm != null) && (tmplbVo.getAlgorithm().compareTo(algorithm) != 0)){
             try {
                 lb.setState(FirewallRule.State.Add);
                 _lbDao.persist(lb);

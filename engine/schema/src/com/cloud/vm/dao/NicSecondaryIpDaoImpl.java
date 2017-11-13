@@ -40,7 +40,7 @@ public class NicSecondaryIpDaoImpl extends GenericDaoBase<NicSecondaryIpVO, Long
         AllFieldsSearch = createSearchBuilder();
         AllFieldsSearch.and("instanceId", AllFieldsSearch.entity().getVmId(), Op.EQ);
         AllFieldsSearch.and("network", AllFieldsSearch.entity().getNetworkId(), Op.EQ);
-        AllFieldsSearch.and("address", AllFieldsSearch.entity().getIp4Address(), Op.EQ);
+        AllFieldsSearch.and("address", AllFieldsSearch.entity().getIp4Address(), Op.LIKE);
         AllFieldsSearch.and("nicId", AllFieldsSearch.entity().getNicId(), Op.EQ);
         AllFieldsSearch.done();
 
@@ -119,8 +119,10 @@ public class NicSecondaryIpDaoImpl extends GenericDaoBase<NicSecondaryIpVO, Long
 
     @Override
     public NicSecondaryIpVO findByIp4AddressAndNetworkId(String ip4Address, long networkId) {
-        // TODO Auto-generated method stub
-        return null;
+        SearchCriteria<NicSecondaryIpVO> sc = AllFieldsSearch.create();
+        sc.setParameters("network", networkId);
+        sc.setParameters("address", ip4Address);
+        return findOneBy(sc);
     }
 
     @Override
@@ -128,6 +130,14 @@ public class NicSecondaryIpDaoImpl extends GenericDaoBase<NicSecondaryIpVO, Long
         SearchCriteria<NicSecondaryIpVO> sc = AllFieldsSearch.create();
         sc.setParameters("address", ip4Address);
         sc.setParameters("nicId", nicId);
+        return findOneBy(sc);
+    }
+
+    @Override
+    public NicSecondaryIpVO findByIp4AddressAndInstanceId(Long vmId, String vmIp) {
+        SearchCriteria<NicSecondaryIpVO> sc = AllFieldsSearch.create();
+        sc.setParameters("instanceId", vmId);
+        sc.setParameters("address", vmIp);
         return findOneBy(sc);
     }
 
@@ -145,5 +155,14 @@ public class NicSecondaryIpDaoImpl extends GenericDaoBase<NicSecondaryIpVO, Long
         SearchCriteria<Long> sc = CountByNicId.create();
         sc.setParameters("nic", nicId);
         return customSearch(sc, null).get(0);
+    }
+
+    @Override
+    public List<NicSecondaryIpVO> listSecondaryIpUsingKeyword(long nicId, String keyword)
+    {
+        SearchCriteria<NicSecondaryIpVO> sc = AllFieldsSearch.create();
+        sc.setParameters("nicId", nicId);
+        sc.setParameters("address", "%" + keyword + "%");
+        return listBy(sc);
     }
 }

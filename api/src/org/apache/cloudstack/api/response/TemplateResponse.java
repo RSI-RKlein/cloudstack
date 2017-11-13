@@ -21,19 +21,18 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 
-import com.google.gson.annotations.SerializedName;
-
 import org.apache.cloudstack.api.ApiConstants;
-import org.apache.cloudstack.api.BaseResponse;
+import org.apache.cloudstack.api.BaseResponseWithTagInformation;
 import org.apache.cloudstack.api.EntityReference;
 
 import com.cloud.serializer.Param;
 import com.cloud.storage.Storage.ImageFormat;
 import com.cloud.template.VirtualMachineTemplate;
+import com.google.gson.annotations.SerializedName;
 
 @EntityReference(value = VirtualMachineTemplate.class)
 @SuppressWarnings("unused")
-public class TemplateResponse extends BaseResponse implements ControlledViewEntityResponse {
+public class TemplateResponse extends BaseResponseWithTagInformation implements ControlledViewEntityResponse {
     @SerializedName(ApiConstants.ID)
     @Param(description = "the template ID")
     private String id;
@@ -118,6 +117,10 @@ public class TemplateResponse extends BaseResponse implements ControlledViewEnti
     @Param(description = "the size of the template")
     private Long size;
 
+    @SerializedName(ApiConstants.PHYSICAL_SIZE)
+    @Param(description = "the physical size of the template")
+    private Long physicalSize;
+
     @SerializedName("templatetype")
     @Param(description = "the type of the template")
     private String templateType;
@@ -170,14 +173,9 @@ public class TemplateResponse extends BaseResponse implements ControlledViewEnti
     @Param(description = "additional key/value details tied with template")
     private Map details;
 
-    // To avoid breaking backwards compatibility, we still treat a template at different zones as different templates, so not embedding
-    // template_zone information in this TemplateZoneResponse set.
-    //    @SerializedName("zones")  @Param(description="list of zones associated with tempate", responseObject = TemplateZoneResponse.class)
-    //    private Set<TemplateZoneResponse> zones;
-
-    @SerializedName(ApiConstants.TAGS)
-    @Param(description = "the list of resource tags associated with tempate", responseObject = ResourceTagResponse.class)
-    private Set<ResourceTagResponse> tags;
+    @SerializedName(ApiConstants.BITS)
+    @Param(description="the processor bit size", since = "4.10")
+    private int bits;
 
     @SerializedName(ApiConstants.SSHKEY_ENABLED)
     @Param(description = "true if template is sshkey enabled, false otherwise")
@@ -188,7 +186,6 @@ public class TemplateResponse extends BaseResponse implements ControlledViewEnti
     private Boolean isDynamicallyScalable;
 
     public TemplateResponse() {
-        //  zones = new LinkedHashSet<TemplateZoneResponse>();
         tags = new LinkedHashSet<ResourceTagResponse>();
     }
 
@@ -282,6 +279,10 @@ public class TemplateResponse extends BaseResponse implements ControlledViewEnti
         this.size = size;
     }
 
+    public void setPhysicalSize(Long physicalSize) {
+        this.physicalSize = physicalSize;
+    }
+
     public void setTemplateType(String templateType) {
         this.templateType = templateType;
     }
@@ -346,10 +347,6 @@ public class TemplateResponse extends BaseResponse implements ControlledViewEnti
         this.tags = tags;
     }
 
-    public void addTag(ResourceTagResponse tag) {
-        this.tags.add(tag);
-    }
-
     public void setSshKeyEnabled(boolean sshKeyEnabled) {
         this.sshKeyEnabled = sshKeyEnabled;
     }
@@ -360,5 +357,9 @@ public class TemplateResponse extends BaseResponse implements ControlledViewEnti
 
     public String getZoneId() {
         return zoneId;
+    }
+
+    public void setBits(int bits) {
+        this.bits = bits;
     }
 }

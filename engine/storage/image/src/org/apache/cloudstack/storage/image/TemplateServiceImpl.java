@@ -18,61 +18,21 @@
  */
 package org.apache.cloudstack.storage.image;
 
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
-import javax.inject.Inject;
-
-import org.apache.log4j.Logger;
-import org.springframework.stereotype.Component;
-import org.apache.cloudstack.engine.subsystem.api.storage.CopyCommandResult;
-import org.apache.cloudstack.engine.subsystem.api.storage.CreateCmdResult;
-import org.apache.cloudstack.engine.subsystem.api.storage.DataMotionService;
-import org.apache.cloudstack.engine.subsystem.api.storage.DataObject;
-import org.apache.cloudstack.engine.subsystem.api.storage.DataStore;
-import org.apache.cloudstack.engine.subsystem.api.storage.DataStoreManager;
-import org.apache.cloudstack.engine.subsystem.api.storage.EndPoint;
-import org.apache.cloudstack.engine.subsystem.api.storage.EndPointSelector;
-import org.apache.cloudstack.engine.subsystem.api.storage.ObjectInDataStoreStateMachine;
-import org.apache.cloudstack.engine.subsystem.api.storage.ObjectInDataStoreStateMachine.Event;
-import org.apache.cloudstack.engine.subsystem.api.storage.ObjectInDataStoreStateMachine.State;
-import org.apache.cloudstack.engine.subsystem.api.storage.SnapshotInfo;
-import org.apache.cloudstack.engine.subsystem.api.storage.StorageCacheManager;
-import org.apache.cloudstack.engine.subsystem.api.storage.TemplateDataFactory;
-import org.apache.cloudstack.engine.subsystem.api.storage.TemplateInfo;
-import org.apache.cloudstack.engine.subsystem.api.storage.TemplateService;
-import org.apache.cloudstack.engine.subsystem.api.storage.VolumeInfo;
-import org.apache.cloudstack.engine.subsystem.api.storage.ZoneScope;
-import org.apache.cloudstack.framework.async.AsyncCallFuture;
-import org.apache.cloudstack.framework.async.AsyncCallbackDispatcher;
-import org.apache.cloudstack.framework.async.AsyncCompletionCallback;
-import org.apache.cloudstack.framework.async.AsyncRpcContext;
-import org.apache.cloudstack.framework.config.dao.ConfigurationDao;
-import org.apache.cloudstack.storage.command.CommandResult;
-import org.apache.cloudstack.storage.command.DeleteCommand;
-import org.apache.cloudstack.storage.datastore.DataObjectManager;
-import org.apache.cloudstack.storage.datastore.ObjectInDataStoreManager;
-import org.apache.cloudstack.storage.datastore.db.TemplateDataStoreDao;
-import org.apache.cloudstack.storage.datastore.db.TemplateDataStoreVO;
-import org.apache.cloudstack.storage.image.datastore.ImageStoreEntity;
-import org.apache.cloudstack.storage.image.store.TemplateObject;
-import org.apache.cloudstack.storage.to.TemplateObjectTO;
-
 import com.cloud.agent.api.Answer;
 import com.cloud.agent.api.storage.ListTemplateAnswer;
 import com.cloud.agent.api.storage.ListTemplateCommand;
 import com.cloud.alert.AlertManager;
 import com.cloud.configuration.Config;
+import com.cloud.configuration.Resource;
 import com.cloud.dc.DataCenterVO;
 import com.cloud.dc.dao.ClusterDao;
 import com.cloud.dc.dao.DataCenterDao;
+import com.cloud.event.EventTypes;
+import com.cloud.event.UsageEventUtils;
 import com.cloud.exception.ResourceAllocationException;
 import com.cloud.hypervisor.Hypervisor.HypervisorType;
 import com.cloud.storage.DataStoreRole;
+import com.cloud.storage.ImageStoreDetailsUtil;
 import com.cloud.storage.Storage.ImageFormat;
 import com.cloud.storage.Storage.TemplateType;
 import com.cloud.storage.StoragePool;
@@ -95,6 +55,51 @@ import com.cloud.utils.db.GlobalLock;
 import com.cloud.utils.exception.CloudRuntimeException;
 import com.cloud.utils.fsm.NoTransitionException;
 import com.cloud.utils.fsm.StateMachine2;
+import org.apache.cloudstack.engine.subsystem.api.storage.CopyCommandResult;
+import org.apache.cloudstack.engine.subsystem.api.storage.CreateCmdResult;
+import org.apache.cloudstack.engine.subsystem.api.storage.DataMotionService;
+import org.apache.cloudstack.engine.subsystem.api.storage.DataObject;
+import org.apache.cloudstack.engine.subsystem.api.storage.DataStore;
+import org.apache.cloudstack.engine.subsystem.api.storage.DataStoreManager;
+import org.apache.cloudstack.engine.subsystem.api.storage.EndPoint;
+import org.apache.cloudstack.engine.subsystem.api.storage.EndPointSelector;
+import org.apache.cloudstack.engine.subsystem.api.storage.ObjectInDataStoreStateMachine;
+import org.apache.cloudstack.engine.subsystem.api.storage.ObjectInDataStoreStateMachine.Event;
+import org.apache.cloudstack.engine.subsystem.api.storage.ObjectInDataStoreStateMachine.State;
+import org.apache.cloudstack.engine.subsystem.api.storage.Scope;
+import org.apache.cloudstack.engine.subsystem.api.storage.SnapshotInfo;
+import org.apache.cloudstack.engine.subsystem.api.storage.StorageCacheManager;
+import org.apache.cloudstack.engine.subsystem.api.storage.TemplateDataFactory;
+import org.apache.cloudstack.engine.subsystem.api.storage.TemplateInfo;
+import org.apache.cloudstack.engine.subsystem.api.storage.TemplateService;
+import org.apache.cloudstack.engine.subsystem.api.storage.VolumeInfo;
+import org.apache.cloudstack.engine.subsystem.api.storage.ZoneScope;
+import org.apache.cloudstack.framework.async.AsyncCallFuture;
+import org.apache.cloudstack.framework.async.AsyncCallbackDispatcher;
+import org.apache.cloudstack.framework.async.AsyncCompletionCallback;
+import org.apache.cloudstack.framework.async.AsyncRpcContext;
+import org.apache.cloudstack.framework.config.dao.ConfigurationDao;
+import org.apache.cloudstack.framework.messagebus.MessageBus;
+import org.apache.cloudstack.framework.messagebus.PublishScope;
+import org.apache.cloudstack.storage.command.CommandResult;
+import org.apache.cloudstack.storage.command.DeleteCommand;
+import org.apache.cloudstack.storage.datastore.DataObjectManager;
+import org.apache.cloudstack.storage.datastore.ObjectInDataStoreManager;
+import org.apache.cloudstack.storage.datastore.db.TemplateDataStoreDao;
+import org.apache.cloudstack.storage.datastore.db.TemplateDataStoreVO;
+import org.apache.cloudstack.storage.image.datastore.ImageStoreEntity;
+import org.apache.cloudstack.storage.image.store.TemplateObject;
+import org.apache.cloudstack.storage.to.TemplateObjectTO;
+import org.apache.log4j.Logger;
+import org.springframework.stereotype.Component;
+
+import javax.inject.Inject;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 @Component
 public class TemplateServiceImpl implements TemplateService {
@@ -135,6 +140,10 @@ public class TemplateServiceImpl implements TemplateService {
     ConfigurationDao _configDao;
     @Inject
     StorageCacheManager _cacheMgr;
+    @Inject
+    MessageBus _messageBus;
+    @Inject
+    ImageStoreDetailsUtil imageStoreDetailsUtil;
 
     class TemplateOpContext<T> extends AsyncRpcContext<T> {
         final TemplateObject template;
@@ -256,7 +265,7 @@ public class TemplateServiceImpl implements TemplateService {
 
             for (VMTemplateVO template : toBeDownloaded) {
                 TemplateDataStoreVO tmpltHost = _vmTemplateStoreDao.findByStoreTemplate(store.getId(), template.getId());
-                if (tmpltHost == null || tmpltHost.getState() != ObjectInDataStoreStateMachine.State.Ready) {
+                if (tmpltHost == null) {
                     associateTemplateToZone(template.getId(), dcId);
                     s_logger.info("Downloading builtin template " + template.getUniqueName() + " to data center: " + dcId);
                     TemplateInfo tmplt = _templateFactory.getTemplate(template.getId(), DataStoreRole.Image);
@@ -352,6 +361,18 @@ public class TemplateServiceImpl implements TemplateService {
                                         toBeDownloaded.add(tmplt);
                                     }
                                 } else {
+                                    if(tmpltStore.getDownloadState() != Status.DOWNLOADED) {
+                                        String etype = EventTypes.EVENT_TEMPLATE_CREATE;
+                                        if (tmplt.getFormat() == ImageFormat.ISO) {
+                                            etype = EventTypes.EVENT_ISO_CREATE;
+                                        }
+
+                                        if (zoneId != null) {
+                                            UsageEventUtils.publishUsageEvent(etype, tmplt.getAccountId(), zoneId, tmplt.getId(), tmplt.getName(), null, null,
+                                                    tmpltInfo.getPhysicalSize(), tmpltInfo.getSize(), VirtualMachineTemplate.class.getName(), tmplt.getUuid());
+                                        }
+                                    }
+
                                     tmpltStore.setDownloadPercent(100);
                                     tmpltStore.setDownloadState(Status.DOWNLOADED);
                                     tmpltStore.setState(ObjectInDataStoreStateMachine.State.Ready);
@@ -402,6 +423,14 @@ public class TemplateServiceImpl implements TemplateService {
                                 tmlpt.setSize(tmpltInfo.getSize());
                                 _templateDao.update(tmplt.getId(), tmlpt);
                                 associateTemplateToZone(tmplt.getId(), zoneId);
+
+                                String etype = EventTypes.EVENT_TEMPLATE_CREATE;
+                                if (tmplt.getFormat() == ImageFormat.ISO) {
+                                    etype = EventTypes.EVENT_ISO_CREATE;
+                                }
+
+                                UsageEventUtils.publishUsageEvent(etype, tmplt.getAccountId(), zoneId, tmplt.getId(), tmplt.getName(), null, null,
+                                        tmpltInfo.getPhysicalSize(), tmpltInfo.getSize(), VirtualMachineTemplate.class.getName(), tmplt.getUuid());
                             }
                         } else if (tmplt.getState() == VirtualMachineTemplate.State.NotUploaded || tmplt.getState() == VirtualMachineTemplate.State.UploadInProgress) {
                             s_logger.info("Template Sync did not find " + uniqueName + " on image store " + storeId + " uploaded using SSVM, marking it as failed");
@@ -471,8 +500,12 @@ public class TemplateServiceImpl implements TemplateService {
                             if (availHypers.contains(tmplt.getHypervisorType())) {
                                 s_logger.info("Downloading template " + tmplt.getUniqueName() + " to image store " + store.getName());
                                 associateTemplateToZone(tmplt.getId(), zoneId);
-                                TemplateInfo tmpl = _templateFactory.getTemplate(tmplt.getId(), DataStoreRole.Image);
-                                createTemplateAsync(tmpl, store, null);
+                                TemplateInfo tmpl = _templateFactory.getTemplate(tmplt.getId(), store);
+                                TemplateOpContext<TemplateApiResult> context = new TemplateOpContext<>(null,(TemplateObject)tmpl, null);
+                                AsyncCallbackDispatcher<TemplateServiceImpl, TemplateApiResult> caller = AsyncCallbackDispatcher.create(this);
+                                caller.setCallback(caller.getTarget().createTemplateAsyncCallBack(null, null));
+                                caller.setContext(context);
+                                createTemplateAsync(tmpl, store, caller);
                             } else {
                                 s_logger.info("Skip downloading template " + tmplt.getUniqueName() + " since current data center does not have hypervisor " +
                                         tmplt.getHypervisorType().toString());
@@ -563,8 +596,50 @@ public class TemplateServiceImpl implements TemplateService {
         }
     }
 
+    protected Void createTemplateAsyncCallBack(AsyncCallbackDispatcher<TemplateServiceImpl, TemplateApiResult> callback,
+                                               TemplateOpContext<TemplateApiResult> context) {
+        TemplateInfo template = context.template;
+        TemplateApiResult result = callback.getResult();
+        if (result.isSuccess()) {
+            VMTemplateVO tmplt = _templateDao.findById(template.getId());
+            // need to grant permission for public templates
+            if (tmplt.isPublicTemplate()) {
+                _messageBus.publish(null, TemplateManager.MESSAGE_REGISTER_PUBLIC_TEMPLATE_EVENT, PublishScope.LOCAL, tmplt.getId());
+            }
+            long accountId = tmplt.getAccountId();
+            if (template.getSize() != null) {
+                // publish usage event
+                String etype = EventTypes.EVENT_TEMPLATE_CREATE;
+                if (tmplt.getFormat() == ImageFormat.ISO) {
+                    etype = EventTypes.EVENT_ISO_CREATE;
+                }
+                // get physical size from template_store_ref table
+                long physicalSize = 0;
+                DataStore ds = template.getDataStore();
+                TemplateDataStoreVO tmpltStore = _vmTemplateStoreDao.findByStoreTemplate(ds.getId(), template.getId());
+                if (tmpltStore != null) {
+                    physicalSize = tmpltStore.getPhysicalSize();
+                } else {
+                    s_logger.warn("No entry found in template_store_ref for template id: " + template.getId() + " and image store id: " + ds.getId() +
+                            " at the end of registering template!");
+                }
+                Scope dsScope = ds.getScope();
+                if (dsScope.getScopeId() != null) {
+                    UsageEventUtils.publishUsageEvent(etype, template.getAccountId(), dsScope.getScopeId(), template.getId(), template.getName(), null, null,
+                            physicalSize, template.getSize(), VirtualMachineTemplate.class.getName(), template.getUuid());
+                } else {
+                    s_logger.warn("Zone scope image store " + ds.getId() + " has a null scope id");
+                }
+                _resourceLimitMgr.incrementResourceCount(accountId, Resource.ResourceType.secondary_storage, template.getSize());
+            }
+        }
+
+        return null;
+    }
+
     private Map<String, TemplateProp> listTemplate(DataStore ssStore) {
-        ListTemplateCommand cmd = new ListTemplateCommand(ssStore.getTO());
+        Integer nfsVersion = imageStoreDetailsUtil.getNfsVersion(ssStore.getId());
+        ListTemplateCommand cmd = new ListTemplateCommand(ssStore.getTO(), nfsVersion);
         EndPoint ep = _epSelector.select(ssStore);
         Answer answer = null;
         if (ep == null) {
@@ -842,6 +917,25 @@ public class TemplateServiceImpl implements TemplateService {
     @Override
     public AsyncCallFuture<TemplateApiResult> prepareTemplateOnPrimary(TemplateInfo srcTemplate, StoragePool pool) {
         return copyAsync(srcTemplate, srcTemplate, (DataStore)pool);
+    }
+
+    @Override
+    public AsyncCallFuture<TemplateApiResult> deleteTemplateOnPrimary(TemplateInfo template, StoragePool pool) {
+        TemplateObject templateObject = (TemplateObject)_templateFactory.getTemplate(template.getId(), (DataStore)pool);
+
+        templateObject.processEvent(ObjectInDataStoreStateMachine.Event.DestroyRequested);
+
+        DataStore dataStore = _storeMgr.getPrimaryDataStore(pool.getId());
+
+        AsyncCallFuture<TemplateApiResult> future = new AsyncCallFuture<>();
+        TemplateOpContext<TemplateApiResult> context = new TemplateOpContext<>(null, templateObject, future);
+        AsyncCallbackDispatcher<TemplateServiceImpl, CommandResult> caller = AsyncCallbackDispatcher.create(this);
+
+        caller.setCallback(caller.getTarget().deleteTemplateCallback(null, null)).setContext(context);
+
+        dataStore.getDriver().deleteAsync(dataStore, templateObject, caller);
+
+        return future;
     }
 
     protected Void copyTemplateCallBack(AsyncCallbackDispatcher<TemplateServiceImpl, CopyCommandResult> callback, TemplateOpContext<TemplateApiResult> context) {

@@ -530,6 +530,7 @@ div.list-view table tbody td span {
   display: block;
   float: left;
   max-width: 89%;
+  word-break: break-all;
   word-wrap: break-word;
   text-indent: 0;
   margin-left: 12px;
@@ -1422,6 +1423,27 @@ div.list-view td.state.transition span {
   background-repeat: no-repeat;
   color: #B90606;
   background-position: 1px -432px;
+}
+
+div.list-view td.state.suitable span {
+  background: url(../images/icons.png) no-repeat scroll 1px -224px;
+  color: #008000;
+  height: 18px;
+}
+
+div.list-view td.state.suitable-storage-migration-required span {
+  width: 200px;
+}
+
+div.list-view td.state.notsuitable span {
+  background: url(../images/icons.png) no-repeat scroll 1px -190px;
+  color: #B90606;
+  height: 19px;
+  width: 100px;
+}
+
+div.list-view td.state.notsuitable-storage-migration-required span {
+    width: 220px !important;
 }
 
 .horizontal-overflow tbody td, .horizontal-overflow thead th {
@@ -2489,7 +2511,7 @@ div.detail-group.actions td {
   padding: 1px 0 0;
   /*+placement:shift -174px -57px;*/
   position: relative;
-  left: -174px;
+  left: -239px;
   top: -57px;
 }
 
@@ -2555,7 +2577,7 @@ div.detail-group.actions td {
   margin: 0;
   position: absolute;
   top: -47px;
-  left: 1090px;
+  left: 1025px;
   cursor: default !important;
   display: inline-block;
   float: left;
@@ -2568,8 +2590,8 @@ div.detail-group.actions td {
   padding: 9px 18px 7px 12px;
   border-right: none;
   /*[empty]border-top:;*/
-  min-width: 75px;
-  max-width: 120px;
+  min-width: 110px;
+  max-width: 220px;
   text-align: center;
   height: 12px;
   overflow: hidden;
@@ -2829,6 +2851,10 @@ div.detail-group.actions td {
   background-position: -82px -686px;
 }
 
+#navigation ul li.vmsnapshots span.icon {
+  background: url(../images/sprites.png) no-repeat -34px -666px;
+}
+
 #navigation ul li.affinityGroups span.icon {
   background-position: -73px -87px;
 }
@@ -2901,6 +2927,15 @@ div.detail-group.actions td {
 #navigation ul li.global-settings:hover span.icon {
   background-image: url(../images/sprites.png);
   background-position: -366px -239px;
+}
+
+#navigation ul li.roles span.icon {
+  background-position: -460px -80px;
+}
+
+#navigation ul li.roles.active span.icon,
+#navigation ul li.roles:hover span.icon {
+  background-position: -469px -750px;
 }
 
 #navigation ul li.accounts span.icon {
@@ -3554,7 +3589,7 @@ div.toolbar div.section-switcher div.section-select label {
 /*Breadcrumbs*/
 div.toolbar div.filters {
   margin: 5px 0px 0 12px;
-  width: 168px;
+  width: 200px;
   float: left;
 }
 
@@ -4310,7 +4345,7 @@ textarea {
 #user-options {
   background: #FFFFFF;
   z-index: 10000;
-  width: 104px;
+  width: 150px;
   position: absolute;
   padding: 15px;
   top: 30px;
@@ -8188,6 +8223,7 @@ div.container div.panel div#details-tab-addloadBalancer.detail-group div.loadBal
 
 .multi-edit th.add-rule,
 .multi-edit td.add-rule {
+  border-right: 1px solid #cdcccc;
 }
 
 .multi-edit .data-table td.add-vm:hover {
@@ -8291,6 +8327,16 @@ div.container div.panel div#details-tab-addloadBalancer.detail-group div.loadBal
   background: transparent;
   color: #808B95;
   font-weight: bold;
+}
+
+.multi-edit-add-list div.form-container {
+  width: auto !important;
+  height: auto;
+  text-align: center;
+}
+
+.multi-edit-add-list div.form-container div.name label {
+  display: inline;
 }
 
 .multi-edit .data .data-body {
@@ -12418,6 +12464,33 @@ div.ui-dialog div.autoscaler div.field-group div.form-container form div.form-it
   background-position: -70px -1311px;
 }
 
+/*CA Cert*/
+.cacert-download {
+  display: inline-block;
+  position: relative;
+  height: 30px;
+  float: right;
+  cursor: pointer;
+  position: absolute;
+  left: 1175px;
+  top: 20px;
+}
+
+.cacert-download .icon {
+  display: inline-block;
+  float: left;
+  display: block;
+  width: 32px;
+  height: 30px;
+  background: url(../images/sprites.png) -142px -348px;
+  position: absolute;
+}
+
+.cacert-download:hover .icon,
+.cacert-download.active .icon {
+  background-position: -368px -348px;
+}
+
 /*Action icons*/
 .action.edit .icon {
   background-position: 1px -1px;
@@ -12683,6 +12756,86 @@ div.ui-dialog div.autoscaler div.field-group div.form-container form div.form-it
   background-position: -137px -614px;
 }
 
+.blankHAForHost .icon {
+  background-position: -266px -31px;
+}
+
+.blankHAForHost:hover .icon {
+  background-position: -266px -31px;
+}
+
+.configureHAForHost .icon {
+  background-position: -270px -148px;
+}
+
+.configureHAForHost:hover .icon {
+  background-position: -270px -728px;
+}
+
+.enableHA .icon {
+  background-position: -265px -93px;
+}
+
+.enableHA:hover .icon {
+  background-position: -265px -673px;
+}
+
+.disableHA .icon {
+  background-position: -265px -120px;
+}
+
+.disableHA:hover .icon {
+  background-position: -265px -700px;
+}
+
+.blankOutOfBandManagement .icon {
+  background-position: -266px -31px;
+}
+
+.blankOutOfBandManagement:hover .icon {
+  background-position: -266px -31px;
+}
+
+.configureOutOfBandManagement .icon {
+  background-position: -168px -31px;
+}
+
+.configureOutOfBandManagement:hover .icon {
+  background-position: -168px -613px;
+}
+
+.enableOutOfBandManagement .icon {
+  background-position: -138px -65px;
+}
+
+.enableOutOfBandManagement:hover .icon {
+  background-position: -138px -647px;
+}
+
+.disableOutOfBandManagement .icon {
+  background-position: -138px -123px;
+}
+
+.disableOutOfBandManagement:hover .icon {
+  background-position: -138px -705px;
+}
+
+.issueOutOfBandManagementPowerAction .icon {
+  background-position: -266px -3px;
+}
+
+.issueOutOfBandManagementPowerAction:hover .icon {
+  background-position: -265px -584px;
+}
+
+.changeOutOfBandManagementPassword .icon {
+  background-position: -68px -30px;
+}
+
+.changeOutOfBandManagementPassword:hover .icon {
+  background-position: -68px -612px;
+}
+
 .enableMaintenanceMode .icon {
   background-position: -138px -65px;
 }
@@ -12754,6 +12907,7 @@ div.ui-dialog div.autoscaler div.field-group div.form-container form div.form-it
 }
 
 .revertSnapshot .icon,
+.revertToVMSnapshot .icon,
 .restoreVM .icon,
 .restore .icon,
 .recover .icon {
@@ -12770,6 +12924,7 @@ div.ui-dialog div.autoscaler div.field-group div.form-container form div.form-it
 }
 
 .revertSnapshot:hover .icon,
+.revertToVMSnapshot:hover .icon,
 .restoreVM:hover .icon,
 .restore:hover .icon {
   background-position: -168px -613px;
@@ -13151,3 +13306,56 @@ div.gpugroups div.list-view {
   background: transparent url("../images/icons.png") no-repeat -626px -209px;
   padding: 0 0 3px 18px;
 }
+
+ul.ui-autocomplete.ui-menu {
+  width: 250px;
+  background: #ddd;
+  font-size: 13px;
+  padding: 5px;
+}
+
+.multi-edit-add-list .ui-button.migrateok,
+.multi-edit-add-list .ui-button.migratecancel {
+  top: -5px !important;
+}
+
+.migrate-vm-available-host-list div.text-search {
+  right: 30px;
+}
+
+.migrate-vm-available-host-list div.ui-widget-content {
+  display: block !important;
+}
+
+.list-view-select table th.availableHostSuitability,
+.list-view-select table td.availableHostSuitability {
+  max-width: 250px;
+}
+.copy-template-destination-list div.text-search {
+  right: 5px;
+}
+
+.copy-template-destination-list div.ui-widget-content {
+  display: block !important;
+}
+
+div.panel.copy-template-destination-list div.list-view div.fixed-header{
+  width: 500px;
+}
+
+.copy-template-destination-list.panel div.list-view div.data-table table{
+  width: 595px;
+}
+
+.copy-template-destination-list .list-view .toolbar {
+  width: 654px;
+}
+
+.multi-edit-add-list .ui-button.copytemplateok{
+  left: 330px;
+}
+
+.multi-edit-add-list .ui-button.copytemplatecancel {
+    left: 310px;
+}
+

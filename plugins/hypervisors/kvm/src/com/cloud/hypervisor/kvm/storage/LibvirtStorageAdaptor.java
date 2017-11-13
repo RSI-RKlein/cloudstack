@@ -35,6 +35,7 @@ import org.libvirt.StorageVol;
 
 import com.ceph.rados.IoCTX;
 import com.ceph.rados.Rados;
+import com.ceph.rados.exceptions.ErrorCode;
 import com.ceph.rados.exceptions.RadosException;
 import com.ceph.rbd.Rbd;
 import com.ceph.rbd.RbdException;
@@ -658,25 +659,25 @@ public class LibvirtStorageAdaptor implements StorageAdaptor {
         s_logger.info("Attempting to create volume " + name + " (" + pool.getType().toString() + ") in pool "
                 + pool.getUuid() + " with size " + size);
 
-        switch (pool.getType()){
-        case RBD:
-            return createPhysicalDiskOnRBD(name, pool, format, provisioningType, size);
-        case NetworkFilesystem:
-        case Filesystem:
-            switch (format){
-            case QCOW2:
-                return createPhysicalDiskByQemuImg(name, pool, format, provisioningType, size);
-            case RAW:
-                return createPhysicalDiskByQemuImg(name, pool, format, provisioningType, size);
-            case DIR:
+        switch (pool.getType()) {
+            case RBD:
                 return createPhysicalDiskByLibVirt(name, pool, format, provisioningType, size);
-            case TAR:
-                return createPhysicalDiskByLibVirt(name, pool, format, provisioningType, size);
+            case NetworkFilesystem:
+            case Filesystem:
+                switch (format) {
+                    case QCOW2:
+                        return createPhysicalDiskByQemuImg(name, pool, format, provisioningType, size);
+                    case RAW:
+                        return createPhysicalDiskByQemuImg(name, pool, format, provisioningType, size);
+                    case DIR:
+                        return createPhysicalDiskByLibVirt(name, pool, format, provisioningType, size);
+                    case TAR:
+                        return createPhysicalDiskByLibVirt(name, pool, format, provisioningType, size);
+                    default:
+                        throw new CloudRuntimeException("Unexpected disk format is specified.");
+                }
             default:
-                throw new CloudRuntimeException("Unexpected disk format is specified.");
-            }
-        default:
-            return createPhysicalDiskByLibVirt(name, pool, format, provisioningType, size);
+                return createPhysicalDiskByLibVirt(name, pool, format, provisioningType, size);
         }
     }
 
@@ -744,50 +745,6 @@ public class LibvirtStorageAdaptor implements StorageAdaptor {
         disk.setFormat(format);
         disk.setSize(actualSize);
         disk.setVirtualSize(virtualSize);
-        return disk;
-    }
-
-    private KVMPhysicalDisk createPhysicalDiskOnRBD(String name, KVMStoragePool pool,
-            PhysicalDiskFormat format, Storage.ProvisioningType provisioningType, long size) {
-        String volPath = null;
-
-        /**
-         * To have RBD function properly we want RBD images of format 2
-         * libvirt currently defaults to format 1
-         *
-         * This has been fixed in libvirt 1.2.2, but that's not upstream
-         * in all distributions
-         *
-         * For that reason we use the native RBD bindings to create the
-         * RBD image until libvirt creates RBD format 2 by default
-         */
-
-        try {
-            s_logger.info("Creating RBD image " + pool.getSourceDir() + "/" + name + " with size " + size);
-
-            Rados r = new Rados(pool.getAuthUserName());
-            r.confSet("mon_host", pool.getSourceHost() + ":" + pool.getSourcePort());
-            r.confSet("key", pool.getAuthSecret());
-            r.confSet("client_mount_timeout", "30");
-            r.connect();
-            s_logger.debug("Succesfully connected to Ceph cluster at " + r.confGet("mon_host"));
-
-            IoCTX io = r.ioCtxCreate(pool.getSourceDir());
-            Rbd rbd = new Rbd(io);
-            rbd.create(name, size, rbdFeatures, rbdOrder);
-
-            r.ioCtxDestroy(io);
-        } catch (RadosException e) {
-            throw new CloudRuntimeException(e.toString());
-        } catch (RbdException e) {
-            throw new CloudRuntimeException(e.toString());
-        }
-
-        volPath = pool.getSourceDir() + "/" + name;
-        KVMPhysicalDisk disk = new KVMPhysicalDisk(volPath, name, pool);
-        disk.setFormat(PhysicalDiskFormat.RAW);
-        disk.setSize(size);
-        disk.setVirtualSize(size);
         return disk;
     }
 
@@ -863,26 +820,36 @@ public class LibvirtStorageAdaptor implements StorageAdaptor {
                 RbdImage image = rbd.open(uuid);
                 s_logger.debug("Fetching list of snapshots of RBD image " + pool.getSourceDir() + "/" + uuid);
                 List<RbdSnapInfo> snaps = image.snapList();
-                for (RbdSnapInfo snap : snaps) {
-                    if (image.snapIsProtected(snap.name)) {
-                        s_logger.debug("Unprotecting snapshot " + pool.getSourceDir() + "/" + uuid + "@" + snap.name);
-                        image.snapUnprotect(snap.name);
-                    } else {
-                        s_logger.debug("Snapshot " + pool.getSourceDir() + "/" + uuid + "@" + snap.name + " is not protected.");
+                try {
+                    for (RbdSnapInfo snap : snaps) {
+                        if (image.snapIsProtected(snap.name)) {
+                            s_logger.debug("Unprotecting snapshot " + pool.getSourceDir() + "/" + uuid + "@" + snap.name);
+                            image.snapUnprotect(snap.name);
+                        } else {
+                            s_logger.debug("Snapshot " + pool.getSourceDir() + "/" + uuid + "@" + snap.name + " is not protected.");
+                        }
+                        s_logger.debug("Removing snapshot " + pool.getSourceDir() + "/" + uuid + "@" + snap.name);
+                        image.snapRemove(snap.name);
                     }
-                    s_logger.debug("Removing snapshot " + pool.getSourceDir() + "/" + uuid + "@" + snap.name);
-                    image.snapRemove(snap.name);
+                    s_logger.info("Succesfully unprotected and removed any remaining snapshots (" + snaps.size() + ") of "
+                        + pool.getSourceDir() + "/" + uuid + " Continuing to remove the RBD image");
+                } catch (RbdException e) {
+                    s_logger.error("Failed to remove snapshot with exception: " + e.toString() +
+                        ", RBD error: " + ErrorCode.getErrorMessage(e.getReturnValue()));
+                    throw new CloudRuntimeException(e.toString() + " - " + ErrorCode.getErrorMessage(e.getReturnValue()));
+                } finally {
+                    s_logger.debug("Closing image and destroying context");
+                    rbd.close(image);
+                    r.ioCtxDestroy(io);
                 }
-
-                rbd.close(image);
-                r.ioCtxDestroy(io);
-
-                s_logger.info("Succesfully unprotected and removed any remaining snapshots (" + snaps.size() + ") of "
-                              + pool.getSourceDir() + "/" + uuid + " Continuing to remove the RBD image");
             } catch (RadosException e) {
-                throw new CloudRuntimeException(e.toString());
+                s_logger.error("Failed to remove snapshot with exception: " + e.toString() +
+                    ", RBD error: " + ErrorCode.getErrorMessage(e.getReturnValue()));
+                throw new CloudRuntimeException(e.toString() + " - " + ErrorCode.getErrorMessage(e.getReturnValue()));
             } catch (RbdException e) {
-                throw new CloudRuntimeException(e.toString());
+                s_logger.error("Failed to remove snapshot with exception: " + e.toString() +
+                    ", RBD error: " + ErrorCode.getErrorMessage(e.getReturnValue()));
+                throw new CloudRuntimeException(e.toString() + " - " + ErrorCode.getErrorMessage(e.getReturnValue()));
             }
         }
 

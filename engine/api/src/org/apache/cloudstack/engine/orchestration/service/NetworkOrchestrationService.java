@@ -23,7 +23,6 @@ import java.util.Map;
 import org.apache.cloudstack.acl.ControlledEntity.ACLType;
 import org.apache.cloudstack.framework.config.ConfigKey;
 import org.apache.cloudstack.framework.config.ConfigKey.Scope;
-
 import com.cloud.deploy.DataCenterDeployment;
 import com.cloud.deploy.DeployDestination;
 import com.cloud.deploy.DeploymentPlan;
@@ -39,6 +38,7 @@ import com.cloud.network.Network.Service;
 import com.cloud.network.NetworkProfile;
 import com.cloud.network.PhysicalNetwork;
 import com.cloud.network.element.DhcpServiceProvider;
+import com.cloud.network.element.DnsServiceProvider;
 import com.cloud.network.element.LoadBalancingServiceProvider;
 import com.cloud.network.element.StaticNatServiceProvider;
 import com.cloud.network.element.UserDataServiceProvider;
@@ -60,20 +60,31 @@ import com.cloud.vm.VirtualMachineProfile;
  *
  */
 public interface NetworkOrchestrationService {
-    static final String NetworkLockTimeoutCK = "network.lock.timeout";
-    static final String GuestDomainSuffixCK = "guest.domain.suffix";
-    static final String NetworkThrottlingRateCK = "network.throttling.rate";
-    static final String MinVRVersionCK = "minreq.sysvmtemplate.version";
+    String NetworkLockTimeoutCK = "network.lock.timeout";
+    String GuestDomainSuffixCK = "guest.domain.suffix";
+    String NetworkThrottlingRateCK = "network.throttling.rate";
+    String MinVRVersionCK = "minreq.sysvmtemplate.version";
 
-    static final ConfigKey<String> MinVRVersion = new ConfigKey<String>(String.class, MinVRVersionCK, "Advanced", "4.6.0",
+    ConfigKey<String> MinVRVersion = new ConfigKey<String>(String.class, MinVRVersionCK, "Advanced", "4.10.0",
             "What version should the Virtual Routers report", true, ConfigKey.Scope.Zone, null);
 
-    static final ConfigKey<Integer> NetworkLockTimeout = new ConfigKey<Integer>(Integer.class, NetworkLockTimeoutCK, "Network", "600",
+    ConfigKey<Integer> NetworkLockTimeout = new ConfigKey<Integer>(Integer.class, NetworkLockTimeoutCK, "Network", "600",
         "Lock wait timeout (seconds) while implementing network", true, Scope.Global, null);
-    static final ConfigKey<String> GuestDomainSuffix = new ConfigKey<String>(String.class, GuestDomainSuffixCK, "Network", "cloud.internal",
+
+    ConfigKey<String> GuestDomainSuffix = new ConfigKey<String>(String.class, GuestDomainSuffixCK, "Network", "cloud.internal",
         "Default domain name for vms inside virtualized networks fronted by router", true, ConfigKey.Scope.Zone, null);
-    static final ConfigKey<Integer> NetworkThrottlingRate = new ConfigKey<Integer>("Network", Integer.class, NetworkThrottlingRateCK, "200",
+
+    ConfigKey<Integer> NetworkThrottlingRate = new ConfigKey<Integer>("Network", Integer.class, NetworkThrottlingRateCK, "200",
         "Default data transfer rate in megabits per second allowed in network.", true, ConfigKey.Scope.Zone);
+
+    ConfigKey<Boolean> PromiscuousMode = new ConfigKey<Boolean>("Advanced", Boolean.class, "network.promiscuous.mode", "false",
+            "Whether to allow or deny promiscuous mode on nics for applicable network elements such as for vswitch/dvswitch portgroups.", true);
+
+    ConfigKey<Boolean> MacAddressChanges = new ConfigKey<Boolean>("Advanced", Boolean.class, "network.mac.address.changes", "true",
+            "Whether to allow or deny mac address changes on nics for applicable network elements such as for vswitch/dvswitch porgroups.", true);
+
+    ConfigKey<Boolean> ForgedTransmits = new ConfigKey<Boolean>("Advanced", Boolean.class, "network.forged.transmits", "true",
+            "Whether to allow or deny forged transmits on nics for applicable network elements such as for vswitch/dvswitch portgroups.", true);
 
     List<? extends Network> setupNetwork(Account owner, NetworkOffering offering, DeploymentPlan plan, String name, String displayText, boolean isDefault)
         throws ConcurrentOperationException;
@@ -95,6 +106,8 @@ public interface NetworkOrchestrationService {
     void expungeNics(VirtualMachineProfile vm);
 
     List<NicProfile> getNicProfiles(VirtualMachine vm);
+
+    Map<String, String> getSystemVMAccessDetails(VirtualMachine vm);
 
     Pair<? extends NetworkGuru, ? extends Network> implementNetwork(long networkId, DeployDestination dest, ReservationContext context)
         throws ConcurrentOperationException, ResourceUnavailableException, InsufficientCapacityException;
@@ -132,9 +145,9 @@ public interface NetworkOrchestrationService {
 
     boolean destroyNetwork(long networkId, ReservationContext context, boolean forced);
 
-    Network createGuestNetwork(long networkOfferingId, String name, String displayText, String gateway, String cidr, String vlanId, String networkDomain, Account owner,
-        Long domainId, PhysicalNetwork physicalNetwork, long zoneId, ACLType aclType, Boolean subdomainAccess, Long vpcId, String ip6Gateway, String ip6Cidr,
-        Boolean displayNetworkEnabled, String isolatedPvlan) throws ConcurrentOperationException, InsufficientCapacityException, ResourceAllocationException;
+    Network createGuestNetwork(long networkOfferingId, String name, String displayText, String gateway, String cidr, String vlanId, boolean bypassVlanOverlapCheck, String networkDomain, Account owner,
+                               Long domainId, PhysicalNetwork physicalNetwork, long zoneId, ACLType aclType, Boolean subdomainAccess, Long vpcId, String ip6Gateway, String ip6Cidr,
+                               Boolean displayNetworkEnabled, String isolatedPvlan) throws ConcurrentOperationException, InsufficientCapacityException, ResourceAllocationException;
 
     UserDataServiceProvider getPasswordResetProvider(Network network);
 
@@ -176,6 +189,11 @@ public interface NetworkOrchestrationService {
         throws InsufficientVirtualNetworkCapacityException, InsufficientAddressCapacityException, ConcurrentOperationException, InsufficientCapacityException,
         ResourceUnavailableException;
 
+    /**
+     * Removes the provided nic from the given vm
+     * @param vm
+     * @param nic
+     */
     void removeNic(VirtualMachineProfile vm, Nic nic);
 
     /**
@@ -213,15 +231,29 @@ public interface NetworkOrchestrationService {
 
     boolean isSecondaryIpSetForNic(long nicId);
 
-    List<? extends Nic> listVmNics(long vmId, Long nicId, Long networkId);
+    List<? extends Nic> listVmNics(long vmId, Long nicId, Long networkId, String keyword);
 
     Nic savePlaceholderNic(Network network, String ip4Address, String ip6Address, Type vmType);
 
     DhcpServiceProvider getDhcpServiceProvider(Network network);
+
+    DnsServiceProvider getDnsServiceProvider(Network network);
 
     void removeDhcpServiceInSubnet(Nic nic);
 
     boolean resourceCountNeedsUpdate(NetworkOffering ntwkOff, ACLType aclType);
 
     void prepareAllNicsForMigration(VirtualMachineProfile vm, DeployDestination dest);
+
+    boolean canUpdateInSequence(Network network, boolean forced);
+
+    List<String> getServicesNotSupportedInNewOffering(Network network, long newNetworkOfferingId);
+
+    void cleanupConfigForServicesInNetwork(List<String> services, Network network);
+
+    void configureUpdateInSequence(Network network);
+
+    int getResourceCount(Network network);
+
+    void finalizeUpdateInSequence(Network network, boolean success);
 }

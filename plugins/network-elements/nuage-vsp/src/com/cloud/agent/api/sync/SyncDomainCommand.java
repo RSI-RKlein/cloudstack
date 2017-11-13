@@ -19,43 +19,40 @@
 
 package com.cloud.agent.api.sync;
 
+import java.util.Objects;
+
+import net.nuage.vsp.acs.client.api.model.VspDomain;
+
+import org.apache.commons.lang.builder.HashCodeBuilder;
+
 import com.cloud.agent.api.Command;
 
 public class SyncDomainCommand extends Command {
 
-    private final String _domainUuid;
-    private final String _domainName;
-    private final String _domainPath;
-    private final boolean _toAdd;
-    private final boolean _toRemove;
+    public enum Type { ADD, REMOVE }
+    private final VspDomain _domain;
+    private final Type _action;
 
-    public SyncDomainCommand(String domainUuid, String domainName, String domainPath, boolean toAdd, boolean toRemove) {
+    public SyncDomainCommand(VspDomain domain, Type action) {
         super();
-        this._domainUuid = domainUuid;
-        this._domainName = domainName;
-        this._domainPath = domainPath;
-        this._toAdd = toAdd;
-        this._toRemove = toRemove;
+        this._domain = domain;
+        this._action = action;
     }
 
-    public String getDomainUuid() {
-        return _domainUuid;
+    public VspDomain getDomain() {
+        return _domain;
     }
 
-    public String getDomainName() {
-        return _domainName;
-    }
-
-    public String getDomainPath() {
-        return _domainPath;
+    public Type getAction() {
+        return _action;
     }
 
     public boolean isToAdd() {
-        return _toAdd;
+        return Type.ADD.equals(_action);
     }
 
     public boolean isToRemove() {
-        return _toRemove;
+        return Type.REMOVE.equals(_action);
     }
 
     @Override
@@ -71,23 +68,17 @@ public class SyncDomainCommand extends Command {
 
         SyncDomainCommand that = (SyncDomainCommand) o;
 
-        if (_toAdd != that._toAdd) return false;
-        if (_toRemove != that._toRemove) return false;
-        if (_domainName != null ? !_domainName.equals(that._domainName) : that._domainName != null) return false;
-        if (_domainPath != null ? !_domainPath.equals(that._domainPath) : that._domainPath != null) return false;
-        if (_domainUuid != null ? !_domainUuid.equals(that._domainUuid) : that._domainUuid != null) return false;
-
-        return true;
+        return super.equals(that)
+                && Objects.equals(_action, that._action)
+                && Objects.equals(_domain, that._domain);
     }
 
     @Override
     public int hashCode() {
-        int result = super.hashCode();
-        result = 31 * result + (_domainUuid != null ? _domainUuid.hashCode() : 0);
-        result = 31 * result + (_domainName != null ? _domainName.hashCode() : 0);
-        result = 31 * result + (_domainPath != null ? _domainPath.hashCode() : 0);
-        result = 31 * result + (_toAdd ? 1 : 0);
-        result = 31 * result + (_toRemove ? 1 : 0);
-        return result;
+        return new HashCodeBuilder()
+                .appendSuper(super.hashCode())
+                .append(_domain)
+                .append(_action)
+                .toHashCode();
     }
 }

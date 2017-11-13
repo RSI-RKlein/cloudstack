@@ -568,6 +568,10 @@ cloudStack.docs = {
         desc: 'Number of guest networks/accounts that will share this device',
         externalLink: ''
     },
+    helpNetscalerServicePackages: {
+        desc: 'Choose the Netscaler Service Package you want to use.',
+        externalLink: ''
+    },
     // Add network offering
     helpNetworkOfferingName: {
         desc: 'Any desired name for the network offering',
@@ -1008,7 +1012,7 @@ cloudStack.docs = {
     },
     // Add volume
     helpVolumeName: {
-        desc: 'Give the volume a unique name so you can find it later.',
+        desc: 'Give a unique volume name. If it is not provided, a name will be generated randomly.',
         externalLink: ''
     },
     helpVolumeAvailabilityZone: {
@@ -1118,6 +1122,10 @@ cloudStack.docs = {
         desc: 'Check this to make the virtual router query its IKE peer at regular intervals to ensure continued availability. It is recommended to have the same DPD setting on both sides of the VPN connection.',
         externalLink: ''
     },
+    helpVPNGatewayForceEncapsulation: {
+        desc: 'Force UDP encapsulation for ESP packets even if no NAT situation is detected. This may help to surmount restrictive firewalls. In order to force the peer to encapsulate packets, NAT detection payloads are faked',
+        externalLink: ''
+    },
     // Copy template
     helpCopyTemplateDestination: {
         desc: 'The zone to which you want to copy the template',
@@ -1193,7 +1201,7 @@ cloudStack.docs = {
         externalLink: ''
     },
     helpRegisterTemplateZone: {
-        desc: 'Choose the zone where you want the template to be available, or All Zones to make it available throughout the cloud',
+        desc: 'Choose one or more zones where you want the template to be available, or All Zones to make it available throughout the cloud. (Tip: Use Ctrl to choose multiple zones)',
         externalLink: ''
     },
     helpRegisterTemplateHypervisor: {

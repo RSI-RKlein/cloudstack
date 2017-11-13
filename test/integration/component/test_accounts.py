@@ -20,6 +20,7 @@
 from marvin.cloudstackTestCase import cloudstackTestCase
 from marvin.lib.utils import (random_gen,
                               cleanup_resources)
+from marvin.cloudstackAPI import *
 from marvin.lib.base import (Domain,
                              Account,
                              ServiceOffering,
@@ -42,6 +43,8 @@ from marvin.lib.common import (get_domain,
 from nose.plugins.attrib import attr
 from marvin.cloudstackException import CloudstackAPIException
 import time
+
+from pyVmomi.VmomiSupport import GetVersionFromVersionUri
 
 
 class Services:
@@ -96,7 +99,7 @@ class Services:
             "template": {
                 "displaytext": "Public Template",
                 "name": "Public template",
-                "ostype": 'CentOS 5.3 (64-bit)',
+                "ostype": 'CentOS 5.6 (64-bit)',
                 "url": "",
                 "hypervisor": '',
                 "format": '',
@@ -110,8 +113,7 @@ class Services:
                 "privateport": 22,
                 "protocol": 'TCP',
             },
-            "ostype": 'CentOS 5.3 (64-bit)',
-            # Cent OS 5.3 (64 bit)
+            "ostype": 'CentOS 5.6 (64-bit)',
             "sleep": 60,
             "timeout": 10,
         }
@@ -248,6 +250,11 @@ class TestAccounts(cloudstackTestCase):
             user.state,
             user_response.state,
             "Check state of created user"
+        )
+        self.assertEqual(
+            "native",
+            user_response.usersource,
+            "Check user source of created user"
         )
         return
 
@@ -1531,6 +1538,175 @@ class TestUserLogin(cloudstackTestCase):
         return
 
 
+class TestUserAPIKeys(cloudstackTestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.testClient = super(TestUserAPIKeys, cls).getClsTestClient()
+        cls.api_client = cls.testClient.getApiClient()
+
+        cls.services = Services().services
+        cls.domain = get_domain(cls.api_client)
+        cls.zone = get_zone(cls.api_client, cls.testClient.getZoneForTests())
+        cls.services['mode'] = cls.zone.networktype
+        # Create an account, domain etc
+        cls.domain = Domain.create(
+            cls.api_client,
+            cls.services["domain"],
+        )
+        cls.account = Account.create(
+            cls.api_client,
+            cls.services["account"],
+            admin=False,
+            domainid=cls.domain.id
+        )
+        cls.domain_2 = Domain.create(
+            cls.api_client,
+            cls.services["domain"],
+        )
+        cls.account_2 = Account.create(
+            cls.api_client,
+            cls.services["account"],
+            admin=False,
+            domainid=cls.domain_2.id
+        )
+        cls._cleanup = [
+            cls.account,
+            cls.domain,
+            cls.account_2,
+            cls.domain_2
+        ]
+        return
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            # Cleanup resources used
+            cleanup_resources(cls.api_client, cls._cleanup)
+        except Exception as e:
+            raise Exception("Warning: Exception during cleanup : %s" % e)
+        return
+
+    def setUp(self):
+        self.apiclient = self.testClient.getApiClient()
+        self.dbclient = self.testClient.getDbConnection()
+        self.cleanup = []
+        return
+
+    def tearDown(self):
+        try:
+            # Clean up, terminate the created network offerings
+            cleanup_resources(self.apiclient, self.cleanup)
+        except Exception as e:
+            raise Exception("Warning: Exception during cleanup : %s" % e)
+        return
+
+    @attr(tags=[
+        "role",
+        "accounts",
+        "simulator",
+        "advanced",
+        "advancedns",
+        "basic",
+        "eip",
+        "sg"
+    ])
+    def test_user_key_renew_same_account(self):
+        # Create an User associated with the account
+        user_1 = User.create(
+            self.apiclient,
+            self.services["user"],
+            account=self.account.name,
+            domainid=self.domain.id
+        )
+        self.cleanup.append(user_1)
+        account_response = list_accounts(
+            self.apiclient,
+            id=self.account.id
+        )[0]
+        self.assertEqual(
+            hasattr(account_response, 'user'),
+            True,
+            "Users are included in account response")
+
+        account_users = account_response.user
+        self.assertEqual(
+            isinstance(account_users, list),
+            True,
+            "Check account for valid data"
+        )
+        self.assertNotEqual(
+            len(account_users),
+            0,
+            "Check number of User in Account")
+        [user] = [u for u in account_users if u.username == user_1.username]
+        self.assertEqual(
+            user.apikey,
+            None,
+            "Check that the user don't have an API key yet")
+
+        self.debug("Register API keys for user")
+        userkeys = User.registerUserKeys(self.apiclient, user_1.id)
+        users = list_accounts(
+            self.apiclient,
+            id=self.account.id
+        )[0].user
+        [user] = [u for u in users if u.id == user_1.id]
+        self.assertEqual(
+            user.apikey,
+            userkeys.apikey,
+            "Check User api key")
+        user.secretkey = self.get_secret_key(user.id)
+        self.assertEqual(
+            user.secretkey,
+            userkeys.secretkey,
+            "Check User having secret key")
+
+        self.debug("Get test client with user keys")
+        cs_api = self.testClient.getUserApiClient(
+            UserName=self.account.name,
+            DomainName=self.account.domain)
+        self.debug("Renew API keys for user using current keys")
+        new_keys = User.registerUserKeys(cs_api, user_1.id)
+        self.assertNotEqual(
+            userkeys.apikey,
+            new_keys.apikey,
+            "Check API key is different")
+        new_keys.secretkey = self.get_secret_key(user_1.id)
+        self.assertNotEqual(
+            userkeys.secretkey,
+            new_keys.secretkey,
+            "Check secret key is different")
+
+    def get_secret_key(self, id):
+        cmd = getUserKeys.getUserKeysCmd()
+        cmd.id = id
+        keypair = self.apiclient.getUserKeys(cmd)
+        return keypair.secretkey
+
+    @attr(tags=[
+        "role",
+        "accounts",
+        "simulator",
+        "advanced",
+        "advancedns",
+        "basic",
+        "eip",
+        "sg"
+    ])
+    def test_user_cannot_renew_other_keys(self):
+        cs_api = self.testClient.getUserApiClient(
+            UserName=self.account.name,
+            DomainName=self.account.domain)
+        self.debug("Try to change API key of an account in another domain")
+        users = list_accounts(
+            self.apiclient,
+            id=self.account_2.id
+        )[0].user
+        with self.assertRaises(CloudstackAPIException) as e:
+            User.registerUserKeys(cs_api, users[0].id)
+
+
 class TestDomainForceRemove(cloudstackTestCase):
 
     @classmethod
@@ -1905,3 +2081,4 @@ class TestDomainForceRemove(cloudstackTestCase):
         with self.assertRaises(Exception):
             domain.delete(self.apiclient, cleanup=False)
         return
+
