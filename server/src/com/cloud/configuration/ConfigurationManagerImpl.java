@@ -84,6 +84,7 @@ import org.apache.cloudstack.region.dao.RegionDao;
 import org.apache.cloudstack.storage.datastore.db.PrimaryDataStoreDao;
 import org.apache.cloudstack.storage.datastore.db.StoragePoolDetailsDao;
 import org.apache.cloudstack.storage.datastore.db.StoragePoolVO;
+import org.apache.commons.collections.CollectionUtils;
 
 import com.cloud.alert.AlertManager;
 import com.cloud.api.ApiDBUtils;
@@ -388,6 +389,9 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
         configValuesForValidation.add("ovm3.heartbeat.timeout");
         configValuesForValidation.add("incorrect.login.attempts.allowed");
         configValuesForValidation.add("vm.password.length");
+        configValuesForValidation.add("externaldhcp.vmip.retrieval.interval");
+        configValuesForValidation.add("externaldhcp.vmip.max.retry");
+        configValuesForValidation.add("externaldhcp.vmipFetch.threadPool.max");
         configValuesForValidation.add("remote.access.vpn.psk.length");
     }
 
@@ -3052,12 +3056,12 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
             // Check if the new VLAN's subnet conflicts with the guest network
             // in
             // the specified zone (guestCidr is null for basic zone)
+            // when adding shared network with same cidr of zone guest cidr,
+            // if the specified vlan is not present in zone, physical network, allow to create the network as the isolation is based on VLAN.
             final String guestNetworkCidr = zone.getGuestNetworkCidr();
-            if (guestNetworkCidr != null) {
-                if (NetUtils.isNetworksOverlap(newCidr, guestNetworkCidr)) {
-                    throw new InvalidParameterValueException("The new IP range you have specified has  overlapped with the guest network in zone: " + zone.getName()
-                            + ". Please specify a different gateway/netmask.");
-                }
+            if (guestNetworkCidr != null && NetUtils.isNetworksOverlap(newCidr, guestNetworkCidr) && _zoneDao.findVnet(zoneId, physicalNetworkId, vlanId).isEmpty() != true) {
+                throw new InvalidParameterValueException("The new IP range you have specified has  overlapped with the guest network in zone: " + zone.getName()
+                        + "along with existing Vlan also. Please specify a different gateway/netmask");
             }
 
             // Check if there are any errors with the IP range
@@ -4930,6 +4934,32 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
         sc.addAnd("systemOnly", SearchCriteria.Op.EQ, systemOnly);
 
         return _networkOfferingDao.search(sc, searchFilter);
+    }
+
+     @Override
+     @DB
+     public boolean releaseDomainSpecificVirtualRanges(final long domainId) {
+        final List<DomainVlanMapVO> maps = _domainVlanMapDao.listDomainVlanMapsByDomain(domainId);
+        if (CollectionUtils.isNotEmpty(maps)) {
+            try {
+                Transaction.execute(new TransactionCallbackNoReturn() {
+                    @Override
+                    public void doInTransactionWithoutResult(final TransactionStatus status) {
+                        for (DomainVlanMapVO map : maps) {
+                            if (!releasePublicIpRange(map.getVlanDbId(), _accountMgr.getSystemUser().getId(), _accountMgr.getAccount(Account.ACCOUNT_ID_SYSTEM))) {
+                                throw new CloudRuntimeException("Failed to release domain specific virtual ip ranges for domain id=" + domainId);
+                            }
+                        }
+                    }
+                });
+            } catch (final CloudRuntimeException e) {
+                s_logger.error(e);
+                return false;
+            }
+        } else {
+            s_logger.trace("Domain id=" + domainId + " has no domain specific virtual ip ranges, nothing to release");
+        }
+        return true;
     }
 
     @Override

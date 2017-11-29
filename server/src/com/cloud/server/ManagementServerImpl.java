@@ -133,6 +133,15 @@ import org.apache.cloudstack.api.command.admin.offering.DeleteDiskOfferingCmd;
 import org.apache.cloudstack.api.command.admin.offering.DeleteServiceOfferingCmd;
 import org.apache.cloudstack.api.command.admin.offering.UpdateDiskOfferingCmd;
 import org.apache.cloudstack.api.command.admin.offering.UpdateServiceOfferingCmd;
+import org.apache.cloudstack.api.command.admin.outofbandmanagement.DisableOutOfBandManagementForClusterCmd;
+import org.apache.cloudstack.api.command.admin.outofbandmanagement.DisableOutOfBandManagementForHostCmd;
+import org.apache.cloudstack.api.command.admin.outofbandmanagement.DisableOutOfBandManagementForZoneCmd;
+import org.apache.cloudstack.api.command.admin.outofbandmanagement.EnableOutOfBandManagementForClusterCmd;
+import org.apache.cloudstack.api.command.admin.outofbandmanagement.EnableOutOfBandManagementForHostCmd;
+import org.apache.cloudstack.api.command.admin.outofbandmanagement.EnableOutOfBandManagementForZoneCmd;
+import org.apache.cloudstack.api.command.admin.outofbandmanagement.ConfigureOutOfBandManagementCmd;
+import org.apache.cloudstack.api.command.admin.outofbandmanagement.IssueOutOfBandManagementPowerActionCmd;
+import org.apache.cloudstack.api.command.admin.outofbandmanagement.ChangeOutOfBandManagementPasswordCmd;
 import org.apache.cloudstack.api.command.admin.pod.CreatePodCmd;
 import org.apache.cloudstack.api.command.admin.pod.DeletePodCmd;
 import org.apache.cloudstack.api.command.admin.pod.ListPodsByCmd;
@@ -2243,79 +2252,6 @@ public class ManagementServerImpl extends ManagerBase implements ManagementServe
         return new Pair<String, Integer>(null, -1);
     }
 
-    @Override
-    @DB
-    public DomainVO updateDomain(final UpdateDomainCmd cmd) {
-        final Long domainId = cmd.getId();
-        final String domainName = cmd.getDomainName();
-        final String networkDomain = cmd.getNetworkDomain();
-
-        // check if domain exists in the system
-        final DomainVO domain = _domainDao.findById(domainId);
-        if (domain == null) {
-            final InvalidParameterValueException ex = new InvalidParameterValueException("Unable to find domain with specified domain id");
-            ex.addProxyObject(domainId.toString(), "domainId");
-            throw ex;
-        } else if (domain.getParent() == null && domainName != null) {
-            // check if domain is ROOT domain - and deny to edit it with the new
-            // name
-            throw new InvalidParameterValueException("ROOT domain can not be edited with a new name");
-        }
-
-        final Account caller = getCaller();
-        _accountMgr.checkAccess(caller, domain);
-
-        // domain name is unique under the parent domain
-        if (domainName != null) {
-            final SearchCriteria<DomainVO> sc = _domainDao.createSearchCriteria();
-            sc.addAnd("name", SearchCriteria.Op.EQ, domainName);
-            sc.addAnd("parent", SearchCriteria.Op.EQ, domain.getParent());
-            final List<DomainVO> domains = _domainDao.search(sc, null);
-
-            final boolean sameDomain = domains.size() == 1 && domains.get(0).getId() == domainId;
-
-            if (!domains.isEmpty() && !sameDomain) {
-                final InvalidParameterValueException ex = new InvalidParameterValueException("Failed to update specified domain id with name '" + domainName
-                        + "' since it already exists in the system");
-                ex.addProxyObject(domain.getUuid(), "domainId");
-                throw ex;
-            }
-        }
-
-        // validate network domain
-        if (networkDomain != null && !networkDomain.isEmpty()) {
-            if (!NetUtils.verifyDomainName(networkDomain)) {
-                throw new InvalidParameterValueException(
-                        "Invalid network domain. Total length shouldn't exceed 190 chars. Each domain label must be between 1 and 63 characters long, can contain ASCII letters 'a' through 'z', the digits '0' through '9', "
-                                + "and the hyphen ('-'); can't start or end with \"-\"");
-            }
-        }
-
-        Transaction.execute(new TransactionCallbackNoReturn() {
-            @Override
-            public void doInTransactionWithoutResult(final TransactionStatus status) {
-                if (domainName != null) {
-                    final String updatedDomainPath = getUpdatedDomainPath(domain.getPath(), domainName);
-                    updateDomainChildren(domain, updatedDomainPath);
-                    domain.setName(domainName);
-                    domain.setPath(updatedDomainPath);
-                }
-
-                if (networkDomain != null) {
-                    if (networkDomain.isEmpty()) {
-                        domain.setNetworkDomain(null);
-                    } else {
-                        domain.setNetworkDomain(networkDomain);
-                    }
-                }
-                _domainDao.update(domainId, domain);
-            }
-        });
-
-        return _domainDao.findById(domainId);
-
-    }
-
     private String getUpdatedDomainPath(final String oldPath, final String newName) {
         final String[] tokenizedPath = oldPath.split("/");
         tokenizedPath[tokenizedPath.length - 1] = newName;
@@ -3021,6 +2957,17 @@ public class ManagementServerImpl extends ManagerBase implements ManagementServe
         cmdList.add(UpdateLBHealthCheckPolicyCmd.class);
         cmdList.add(GetUploadParamsForTemplateCmd.class);
         cmdList.add(GetUploadParamsForVolumeCmd.class);
+        // Out-of-band management APIs for admins
+        cmdList.add(EnableOutOfBandManagementForHostCmd.class);
+        cmdList.add(DisableOutOfBandManagementForHostCmd.class);
+        cmdList.add(EnableOutOfBandManagementForClusterCmd.class);
+        cmdList.add(DisableOutOfBandManagementForClusterCmd.class);
+        cmdList.add(EnableOutOfBandManagementForZoneCmd.class);
+        cmdList.add(DisableOutOfBandManagementForZoneCmd.class);
+        cmdList.add(ConfigureOutOfBandManagementCmd.class);
+        cmdList.add(IssueOutOfBandManagementPowerActionCmd.class);
+        cmdList.add(ChangeOutOfBandManagementPasswordCmd.class);
+
         return cmdList;
     }
 
@@ -3580,7 +3527,17 @@ public class ManagementServerImpl extends ManagerBase implements ManagementServe
         final Long domainId = cmd.getDomainId();
         final Long projectId = cmd.getProjectId();
 
-        final Account owner = _accountMgr.finalizeOwner(caller, accountName, domainId, projectId);
+        Account owner = null;
+        try {
+            owner = _accountMgr.finalizeOwner(caller, accountName, domainId, projectId);
+        } catch (InvalidParameterValueException ex) {
+            if (caller.getType() == Account.ACCOUNT_TYPE_ADMIN && accountName != null && domainId != null) {
+                owner = _accountDao.findAccountIncludingRemoved(accountName, domainId);
+            }
+            if (owner == null) {
+                throw ex;
+            }
+        }
 
         final SSHKeyPairVO s = _sshKeyPairDao.findByName(owner.getAccountId(), owner.getDomainId(), cmd.getName());
         if (s == null) {

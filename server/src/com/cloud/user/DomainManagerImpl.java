@@ -35,6 +35,7 @@ import org.apache.cloudstack.framework.messagebus.MessageBus;
 import org.apache.cloudstack.framework.messagebus.PublishScope;
 import org.apache.cloudstack.region.RegionManager;
 
+import com.cloud.configuration.ConfigurationManager;
 import com.cloud.configuration.Resource.ResourceOwnerType;
 import com.cloud.configuration.ResourceLimit;
 import com.cloud.configuration.dao.ResourceCountDao;
@@ -73,6 +74,7 @@ import com.cloud.utils.exception.CloudRuntimeException;
 import com.cloud.utils.net.NetUtils;
 import com.cloud.vm.ReservationContext;
 import com.cloud.vm.ReservationContextImpl;
+import com.google.common.base.Strings;
 
 @Component
 public class DomainManagerImpl extends ManagerBase implements DomainManager, DomainService {
@@ -104,6 +106,8 @@ public class DomainManagerImpl extends ManagerBase implements DomainManager, Dom
     private NetworkOrchestrationService _networkMgr;
     @Inject
     private NetworkDomainDao _networkDomainDao;
+    @Inject
+    private ConfigurationManager _configMgr;
 
     @Inject
     MessageBus _messageBus;
@@ -219,6 +223,25 @@ public class DomainManagerImpl extends ManagerBase implements DomainManager, Dom
     }
 
     @Override
+    public Domain findDomainByIdOrPath(final Long id, final String domainPath) {
+        Long domainId = id;
+        if (domainId == null || domainId < 1L) {
+            if (Strings.isNullOrEmpty(domainPath) || domainPath.trim().isEmpty()) {
+                domainId = Domain.ROOT_DOMAIN;
+            } else {
+                final Domain domainVO = findDomainByPath(domainPath.trim());
+                if (domainVO != null) {
+                    return domainVO;
+                }
+            }
+        }
+        if (domainId != null && domainId > 0L) {
+            return _domainDao.findById(domainId);
+        }
+        return null;
+    }
+
+    @Override
     public Set<Long> getDomainParentIds(long domainId) {
         return _domainDao.getDomainParentIds(domainId);
     }
@@ -306,8 +329,17 @@ public class DomainManagerImpl extends ManagerBase implements DomainManager, Dom
                 }
             }
 
+            if (!_configMgr.releaseDomainSpecificVirtualRanges(domain.getId())) {
+                CloudRuntimeException e = new CloudRuntimeException("Can't delete the domain yet because failed to release domain specific virtual ip ranges");
+                e.addProxyObject(domain.getUuid(), "domainId");
+                throw e;
+            } else {
+                s_logger.debug("Domain specific Virtual IP ranges " + " are successfully released as a part of domain id=" + domain.getId() + " cleanup.");
+            }
+
             cleanupDomainOfferings(domain.getId());
             CallContext.current().putContextParameter(Domain.class, domain.getUuid());
+            _messageBus.publish(_name, MESSAGE_REMOVE_DOMAIN_EVENT, PublishScope.LOCAL, domain);
             return true;
         } catch (Exception ex) {
             s_logger.error("Exception deleting domain with id " + domain.getId(), ex);
@@ -352,7 +384,7 @@ public class DomainManagerImpl extends ManagerBase implements DomainManager, Dom
             List<DomainVO> domains = _domainDao.search(sc, null);
 
             SearchCriteria<DomainVO> sc1 = _domainDao.createSearchCriteria();
-            sc1.addAnd("path", SearchCriteria.Op.LIKE, "%" + domainHandle.getPath() + "%");
+            sc1.addAnd("path", SearchCriteria.Op.LIKE, "%" + "replace(" + domainHandle.getPath() + ", '%', '[%]')" + "%");
             List<DomainVO> domainsToBeInactivated = _domainDao.search(sc1, null);
 
             // update all subdomains to inactive so no accounts/users can be created
@@ -595,6 +627,7 @@ public class DomainManagerImpl extends ManagerBase implements DomainManager, Dom
         if (domainName != null) {
             SearchCriteria<DomainVO> sc = _domainDao.createSearchCriteria();
             sc.addAnd("name", SearchCriteria.Op.EQ, domainName);
+            sc.addAnd("parent", SearchCriteria.Op.EQ, domain.getParent());
             List<DomainVO> domains = _domainDao.search(sc, null);
 
             boolean sameDomain = (domains.size() == 1 && domains.get(0).getId() == domainId);

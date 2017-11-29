@@ -16,22 +16,21 @@
 // under the License.
 package org.apache.cloudstack.api.response;
 
+import com.cloud.serializer.Param;
+import com.cloud.storage.Volume;
+import com.google.gson.annotations.SerializedName;
+import org.apache.cloudstack.acl.RoleType;
+import org.apache.cloudstack.api.ApiConstants;
+import org.apache.cloudstack.api.BaseResponseWithTagInformation;
+import org.apache.cloudstack.api.EntityReference;
+
 import java.util.Date;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
-import org.apache.cloudstack.acl.RoleType;
-import org.apache.cloudstack.api.ApiConstants;
-import org.apache.cloudstack.api.BaseResponse;
-import org.apache.cloudstack.api.EntityReference;
-
-import com.cloud.serializer.Param;
-import com.cloud.storage.Volume;
-import com.google.gson.annotations.SerializedName;
-
 @EntityReference(value = Volume.class)
 @SuppressWarnings("unused")
-public class VolumeResponse extends BaseResponse implements ControlledViewEntityResponse {
+public class VolumeResponse extends BaseResponseWithTagInformation implements ControlledViewEntityResponse {
     @SerializedName(ApiConstants.ID)
     @Param(description = "ID of the disk volume")
     private String id;
@@ -211,10 +210,6 @@ public class VolumeResponse extends BaseResponse implements ControlledViewEntity
     @SerializedName(ApiConstants.STATUS)
     @Param(description = "the status of the volume")
     private String status;
-
-    @SerializedName(ApiConstants.TAGS)
-    @Param(description = "the list of resource tags associated with volume", responseObject = ResourceTagResponse.class)
-    private Set<ResourceTagResponse> tags;
 
     @SerializedName(ApiConstants.DISPLAY_VOLUME)
     @Param(description = "an optional field whether to the display the volume to the end user or not.", authorized = {RoleType.Admin})
@@ -439,14 +434,6 @@ public class VolumeResponse extends BaseResponse implements ControlledViewEntity
         this.projectName = projectName;
     }
 
-    public void setTags(Set<ResourceTagResponse> tags) {
-        this.tags = tags;
-    }
-
-    public void addTag(ResourceTagResponse tag) {
-        this.tags.add(tag);
-    }
-
     public void setDisplayVolume(Boolean displayVm) {
         this.displayVolume = displayVm;
     }
@@ -521,5 +508,145 @@ public class VolumeResponse extends BaseResponse implements ControlledViewEntity
 
     public void setTemplateDisplayText(String templateDisplayText) {
         this.templateDisplayText = templateDisplayText;
+    }
+
+    public void setTags(Set<ResourceTagResponse> tags) {
+        this.tags = tags;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public String getZoneId() {
+        return zoneId;
+    }
+
+    public String getZoneName() {
+        return zoneName;
+    }
+
+    public String getVolumeType() {
+        return volumeType;
+    }
+
+    public Long getDeviceId() {
+        return deviceId;
+    }
+
+    public String getVirtualMachineId() {
+        return virtualMachineId;
+    }
+
+    public String getVirtualMachineName() {
+        return virtualMachineName;
+    }
+
+    public String getVirtualMachineDisplayName() {
+        return virtualMachineDisplayName;
+    }
+
+    public String getVirtualMachineState() {
+        return virtualMachineState;
+    }
+
+    public String getProvisioningType() {
+        return provisioningType;
+    }
+
+    public Long getSize() {
+        return size;
+    }
+
+    public Long getMinIops() {
+        return minIops;
+    }
+
+    public Long getMaxIops() {
+        return maxIops;
+    }
+
+    public Date getCreated() {
+        return created;
+    }
+
+    public String getState() {
+        return state;
+    }
+
+    public String getAccountName() {
+        return accountName;
+    }
+
+    public String getProjectId() {
+        return projectId;
+    }
+
+    public String getProjectName() {
+        return projectName;
+    }
+
+    public String getDomainId() {
+        return domainId;
+    }
+
+    public String getDomainName() {
+        return domainName;
+    }
+
+    public String getStorageType() {
+        return storageType;
+    }
+
+    public String getHypervisor() {
+        return hypervisor;
+    }
+
+    public String getDiskOfferingId() {
+        return diskOfferingId;
+    }
+
+    public String getDiskOfferingName() {
+        return diskOfferingName;
+    }
+
+    public String getDiskOfferingDisplayText() {
+        return diskOfferingDisplayText;
+    }
+
+    public String getStoragePoolName() {
+        return storagePoolName;
+    }
+
+    public String getSnapshotId() {
+        return snapshotId;
+    }
+
+    public Date getAttached() {
+        return attached;
+    }
+
+    public String getServiceOfferingId() {
+        return serviceOfferingId;
+    }
+
+    public String getServiceOfferingName() {
+        return serviceOfferingName;
+    }
+
+    public String getServiceOfferingDisplayText() {
+        return serviceOfferingDisplayText;
+    }
+
+    public Boolean getExtractable() {
+        return extractable;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public Boolean getDisplayVolume() {
+        return displayVolume;
     }
 }

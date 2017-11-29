@@ -835,7 +835,7 @@ public class NetworkServiceImpl extends ManagerBase implements  NetworkService {
                 }
             }
             //check if the secondary ip associated with any static nat rule
-            IPAddressVO publicIpVO = _ipAddressDao.findByVmIp(secondaryIp);
+            IPAddressVO publicIpVO = _ipAddressDao.findByIpAndNetworkId(secIpVO.getNetworkId(), secondaryIp);
             if (publicIpVO != null) {
                 s_logger.debug("VM nic IP " + secondaryIp + " is associated with the static NAT rule public IP address id " + publicIpVO.getId());
                 throw new InvalidParameterValueException("Can' remove the ip " + secondaryIp + "is associate with static NAT rule public IP address id " + publicIpVO.getId());
@@ -2008,7 +2008,7 @@ public class NetworkServiceImpl extends ManagerBase implements  NetworkService {
         //perform below validation if the network is vpc network
         if (network.getVpcId() != null && networkOfferingId != null) {
             Vpc vpc = _entityMgr.findById(Vpc.class, network.getVpcId());
-            _vpcMgr.validateNtwkOffForNtwkInVpc(networkId, networkOfferingId, null, null, vpc, null, _accountMgr.getAccount(network.getAccountId()), null);
+            _vpcMgr.validateNtwkOffForNtwkInVpc(networkId, networkOfferingId, null, null, vpc, null, _accountMgr.getAccount(network.getAccountId()), network.getNetworkACLId());
         }
 
         // don't allow to update network in Destroy state

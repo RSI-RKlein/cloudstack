@@ -90,10 +90,11 @@ export currentversion=`mvn org.apache.maven.plugins:maven-help-plugin:2.1.1:eval
 echo "found $currentversion"
 
 echo 'setting version numbers'
-mvn versions:set -DnewVersion=$version -P vmware -P developer -P systemvm -P simulator -P baremetal -P ucs -Dnoredist
+
+mvn versions:set -DnewVersion=$version -P developer,systemvm -Dnoredist -Dsimulator
+mvn versions:set -DnewVersion=$version -pl tools/checkstyle
 mv deps/XenServerJava/pom.xml.versionsBackup deps/XenServerJava/pom.xml
 perl -pi -e "s/<cs.xapi.version>6.2.0-1-SNAPSHOT<\/cs.xapi.version>/<cs.xapi.version>6.2.0-1<\/cs.xapi.version>/" pom.xml
-perl -pi -e "s/-SNAPSHOT//" tools/checkstyle/pom.xml
 perl -pi -e "s/-SNAPSHOT//" deps/XenServerJava/pom.xml
 perl -pi -e "s/-SNAPSHOT//" tools/apidoc/pom.xml
 perl -pi -e "s/-SNAPSHOT//" Dockerfile
@@ -153,8 +154,8 @@ fi
 echo 'md5'
 gpg -v --print-md MD5 apache-cloudstack-$version-src.tar.bz2 > apache-cloudstack-$version-src.tar.bz2.md5
 
-echo 'sha'
-gpg -v --print-md SHA512 apache-cloudstack-$version-src.tar.bz2 > apache-cloudstack-$version-src.tar.bz2.sha
+echo 'sha512'
+gpg -v --print-md SHA512 apache-cloudstack-$version-src.tar.bz2 > apache-cloudstack-$version-src.tar.bz2.sha512
 
 echo 'verify'
 gpg -v --verify apache-cloudstack-$version-src.tar.bz2.asc apache-cloudstack-$version-src.tar.bz2
@@ -186,11 +187,11 @@ if [ "$committosvn" == "yes" ]; then
   cp $outputdir/apache-cloudstack-$version-src.tar.bz2 .
   cp $outputdir/apache-cloudstack-$version-src.tar.bz2.asc .
   cp $outputdir/apache-cloudstack-$version-src.tar.bz2.md5 .
-  cp $outputdir/apache-cloudstack-$version-src.tar.bz2.sha .
+  cp $outputdir/apache-cloudstack-$version-src.tar.bz2.sha512 .
   svn add apache-cloudstack-$version-src.tar.bz2
   svn add apache-cloudstack-$version-src.tar.bz2.asc
   svn add apache-cloudstack-$version-src.tar.bz2.md5
-  svn add apache-cloudstack-$version-src.tar.bz2.sha
+  svn add apache-cloudstack-$version-src.tar.bz2.sha512
   svn commit -m "Committing release candidate artifacts for $version to dist/dev/cloudstack in preparation for release vote"
 fi
 

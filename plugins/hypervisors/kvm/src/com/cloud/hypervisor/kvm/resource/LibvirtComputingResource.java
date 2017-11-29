@@ -25,6 +25,7 @@ import java.io.Reader;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
+import org.joda.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
@@ -52,6 +53,8 @@ import org.apache.cloudstack.utils.linux.MemStat;
 import org.apache.cloudstack.utils.qemu.QemuImg.PhysicalDiskFormat;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
+import org.apache.commons.lang.ArrayUtils;
+import org.apache.commons.lang.math.NumberUtils;
 import org.apache.log4j.Logger;
 import org.libvirt.Connect;
 import org.libvirt.Domain;
@@ -60,6 +63,7 @@ import org.libvirt.DomainInfo;
 import org.libvirt.DomainInfo.DomainState;
 import org.libvirt.DomainInterfaceStats;
 import org.libvirt.LibvirtException;
+import org.libvirt.MemoryStatistic;
 import org.libvirt.NodeInfo;
 
 import com.cloud.agent.api.Answer;
@@ -188,8 +192,8 @@ public class LibvirtComputingResource extends ServerResourceBase implements Serv
     private String _clusterId;
 
     private long _hvVersion;
-    private long _kernelVersion;
-    private int _timeout;
+    private Duration _timeout;
+    private static final int NUMMEMSTATS =2;
 
     private KVMHAMonitor _monitor;
     public static final String SSHKEYSPATH = "/root/.ssh";
@@ -276,12 +280,12 @@ public class LibvirtComputingResource extends ServerResourceBase implements Serv
 
     @Override
     public ExecutionResult executeInVR(final String routerIp, final String script, final String args) {
-        return executeInVR(routerIp, script, args, _timeout / 1000);
+        return executeInVR(routerIp, script, args, _timeout);
     }
 
     @Override
-    public ExecutionResult executeInVR(final String routerIp, final String script, final String args, final int timeout) {
-        final Script command = new Script(_routerProxyPath, timeout * 1000, s_logger);
+    public ExecutionResult executeInVR(final String routerIp, final String script, final String args, final Duration timeout) {
+        final Script command = new Script(_routerProxyPath, timeout, s_logger);
         final AllLinesParser parser = new AllLinesParser();
         command.add(script);
         command.add(routerIp);
@@ -383,7 +387,7 @@ public class LibvirtComputingResource extends ServerResourceBase implements Serv
         return _updateHostPasswdPath;
     }
 
-    public int getTimeout() {
+    public Duration getTimeout() {
         return _timeout;
     }
 
@@ -630,9 +634,9 @@ public class LibvirtComputingResource extends ServerResourceBase implements Serv
             throw new ConfigurationException("Unable to find versions.sh");
         }
 
-        _patchViaSocketPath = Script.findScript(kvmScriptsDir + "/patch/", "patchviasocket.pl");
+        _patchViaSocketPath = Script.findScript(kvmScriptsDir + "/patch/", "patchviasocket.py");
         if (_patchViaSocketPath == null) {
-            throw new ConfigurationException("Unable to find patchviasocket.pl");
+            throw new ConfigurationException("Unable to find patchviasocket.py");
         }
 
         _heartBeatPath = Script.findScript(kvmScriptsDir, "kvmheartbeat.sh");
@@ -774,7 +778,7 @@ public class LibvirtComputingResource extends ServerResourceBase implements Serv
         }
 
         value = (String)params.get("scripts.timeout");
-        _timeout = NumbersUtil.parseInt(value, 30 * 60) * 1000;
+        _timeout = Duration.standardSeconds(NumbersUtil.parseInt(value, 30 * 60));
 
         value = (String)params.get("stop.script.timeout");
         _stopTimeout = NumbersUtil.parseInt(value, 120) * 1000;
@@ -956,13 +960,6 @@ public class LibvirtComputingResource extends ServerResourceBase implements Serv
         storageProcessor.configure(name, params);
         storageHandler = new StorageSubsystemCommandHandlerBase(storageProcessor);
 
-        final String unameKernelVersion = Script.runSimpleBashScript("uname -r");
-        final String[] kernelVersions = unameKernelVersion.split("[\\.\\-]");
-        _kernelVersion = Integer.parseInt(kernelVersions[0]) * 1000 * 1000 + (long)Integer.parseInt(kernelVersions[1]) * 1000 + Integer.parseInt(kernelVersions[2]);
-
-        /* Disable this, the code using this is pretty bad and non portable
-         * getOsVersion();
-         */
         return true;
     }
 
@@ -1243,7 +1240,7 @@ public class LibvirtComputingResource extends ServerResourceBase implements Serv
         command.add("-p", cmdLine.replaceAll(" ", "%"));
         result = command.execute();
         if (result != null) {
-            s_logger.debug("passcmd failed:" + result);
+            s_logger.error("passcmd failed:" + result);
             return false;
         }
         return true;
@@ -1467,7 +1464,7 @@ public class LibvirtComputingResource extends ServerResourceBase implements Serv
 
     private String getBroadcastUriFromBridge(final String brName) {
         final String pif = matchPifFileInDirectory(brName);
-        final Pattern pattern = Pattern.compile("(\\D+)(\\d+)(\\D*)(\\d*)");
+        final Pattern pattern = Pattern.compile("(\\D+)(\\d+)(\\D*)(\\d*)(\\D*)(\\d*)");
         final Matcher matcher = pattern.matcher(pif);
         s_logger.debug("getting broadcast uri for pif " + pif + " and bridge " + brName);
         if(matcher.find()) {
@@ -1475,7 +1472,9 @@ public class LibvirtComputingResource extends ServerResourceBase implements Serv
                 return BroadcastDomainType.Vxlan.toUri(matcher.group(2)).toString();
             }
             else{
-                if (!matcher.group(4).isEmpty()) {
+                if (!matcher.group(6).isEmpty()) {
+                    return BroadcastDomainType.Vlan.toUri(matcher.group(6)).toString();
+                } else if (!matcher.group(4).isEmpty()) {
                     return BroadcastDomainType.Vlan.toUri(matcher.group(4)).toString();
                 } else {
                     //untagged or not matching (eth|bond|team)#.#
@@ -2626,7 +2625,14 @@ public class LibvirtComputingResource extends ServerResourceBase implements Serv
             final NodeInfo hosts = conn.nodeInfo();
             speed = getCpuSpeed(hosts);
 
+            /*
+            * Some CPUs report a single socket and multiple NUMA cells.
+            * We need to multiply them to get the correct socket count.
+            */
             cpuSockets = hosts.sockets;
+            if (hosts.nodes > 0) {
+                cpuSockets = hosts.sockets * hosts.nodes;
+            }
             cpus = hosts.cpus;
             ram = hosts.memory * 1024L;
             final LibvirtCapXMLParser parser = new LibvirtCapXMLParser();
@@ -2697,7 +2703,7 @@ public class LibvirtComputingResource extends ServerResourceBase implements Serv
                 }
             }
             s_logger.debug(vmDef);
-            msg = stopVM(conn, vmName);
+            msg = stopVM(conn, vmName, false);
             msg = startVM(conn, vmName, vmDef);
             return null;
         } catch (final LibvirtException e) {
@@ -2719,14 +2725,17 @@ public class LibvirtComputingResource extends ServerResourceBase implements Serv
         return msg;
     }
 
-    public String stopVM(final Connect conn, final String vmName) {
+    public String stopVM(final Connect conn, final String vmName, final boolean forceStop) {
         DomainState state = null;
         Domain dm = null;
 
         s_logger.debug("Try to stop the vm at first");
-        String ret = stopVM(conn, vmName, false);
+        if (forceStop) {
+            return stopVMInternal(conn, vmName, true);
+        }
+        String ret = stopVMInternal(conn, vmName, false);
         if (ret == Script.ERR_TIMEOUT) {
-            ret = stopVM(conn, vmName, true);
+            ret = stopVMInternal(conn, vmName, true);
         } else if (ret != null) {
             /*
              * There is a race condition between libvirt and qemu: libvirt
@@ -2759,7 +2768,7 @@ public class LibvirtComputingResource extends ServerResourceBase implements Serv
 
             if (state != DomainState.VIR_DOMAIN_SHUTOFF) {
                 s_logger.debug("Try to destroy the vm");
-                ret = stopVM(conn, vmName, true);
+                ret = stopVMInternal(conn, vmName, true);
                 if (ret != null) {
                     return ret;
                 }
@@ -2769,7 +2778,7 @@ public class LibvirtComputingResource extends ServerResourceBase implements Serv
         return null;
     }
 
-    protected String stopVM(final Connect conn, final String vmName, final boolean force) {
+    protected String stopVMInternal(final Connect conn, final String vmName, final boolean force) {
         Domain dm = null;
         try {
             dm = conn.domainLookupByName(vmName);
@@ -3025,11 +3034,18 @@ public class LibvirtComputingResource extends ServerResourceBase implements Serv
         Domain dm = null;
         try {
             dm = getDomain(conn, vmName);
-            final DomainInfo info = dm.getInfo();
-
+            if (dm == null) {
+                return null;
+            }
+            DomainInfo info = dm.getInfo();
             final VmStatsEntry stats = new VmStatsEntry();
+
             stats.setNumCPUs(info.nrVirtCpu);
             stats.setEntityType("vm");
+
+            stats.setMemoryKBs(info.maxMem);
+            stats.setTargetMemoryKBs(info.memory);
+            stats.setIntFreeMemoryKBs(getMemoryFreeInKBs(dm));
 
             /* get cpu utilization */
             VmStats oldStats = null;
@@ -3079,6 +3095,9 @@ public class LibvirtComputingResource extends ServerResourceBase implements Serv
             long bytes_rd = 0;
             long bytes_wr = 0;
             for (final DiskDef disk : disks) {
+                if (disk.getDeviceType() == DeviceType.CDROM || disk.getDeviceType() == DeviceType.FLOPPY) {
+                    continue;
+                }
                 final DomainBlockStats blockStats = dm.blockStats(disk.getDiskLabel());
                 io_rd += blockStats.rd_req;
                 io_wr += blockStats.wr_req;
@@ -3122,6 +3141,21 @@ public class LibvirtComputingResource extends ServerResourceBase implements Serv
                 dm.free();
             }
         }
+    }
+
+    /**
+    * This method retrieves the memory statistics from the domain given as parameters.
+    * If no memory statistic is found, it will return {@link NumberUtils#LONG_ZERO} as the value of free memory in the domain.
+    * If it can retrieve the domain memory statistics, it will return the free memory statistic; that means, it returns the value at the first position of the array returned by {@link Domain#memoryStats(int)}.
+    *
+    * @return the amount of free memory in KBs
+    */
+    protected long getMemoryFreeInKBs(Domain dm) throws LibvirtException {
+        MemoryStatistic[] mems = dm.memoryStats(NUMMEMSTATS);
+        if (ArrayUtils.isEmpty(mems)) {
+            return NumberUtils.LONG_ZERO;
+        }
+        return mems[0].getValue();
     }
 
     private boolean canBridgeFirewall(final String prvNic) {

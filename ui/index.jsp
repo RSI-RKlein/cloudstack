@@ -1818,11 +1818,11 @@
         <script type="text/javascript" src="scripts/ui-custom/securityRules.js"></script>
         <script type="text/javascript" src="scripts/ui-custom/vpc.js"></script>
         <script type="text/javascript" src="scripts/vpc.js"></script>
-        <script type="text/javascript" src="scripts/network.js"></script>
         <script type="text/javascript" src="scripts/ui-custom/recurringSnapshots.js"></script>
         <script type="text/javascript" src="scripts/ui-custom/uploadVolume.js"></script>
         <script type="text/javascript" src="scripts/storage.js"></script>
         <script type="text/javascript" src="scripts/templates.js"></script>
+        <script type="text/javascript" src="scripts/roles.js"></script>
         <script type="text/javascript" src="scripts/accountsWizard.js"></script>
         <script type="text/javascript" src="scripts/ui-custom/accountsWizard.js"></script>
         <script type="text/javascript" src="scripts/accounts.js"></script>
@@ -1832,6 +1832,7 @@
         <script type="text/javascript" src="scripts/ui-custom/physicalResources.js"></script>
         <script type="text/javascript" src="scripts/ui-custom/zoneWizard.js"></script>
         <script type="text/javascript" src="scripts/system.js"></script>
+        <script type="text/javascript" src="scripts/network.js"></script>
         <script type="text/javascript" src="scripts/domains.js"></script>
         <script type="text/javascript" src="scripts/docs.js"></script>
         <script type="text/javascript" src="scripts/vm_snapshots.js"></script>

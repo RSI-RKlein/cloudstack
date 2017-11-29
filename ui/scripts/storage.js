@@ -80,10 +80,7 @@
                                 fields: {
                                     name: {
                                         docID: 'helpVolumeName',
-                                        label: 'label.name',
-                                        validation: {
-                                            required: true
-                                        }
+                                        label: 'label.name'
                                     },
                                     availabilityZone: {
                                         label: 'label.availability.zone',
@@ -1553,6 +1550,8 @@
                                     preFilter: function(args) {
                                         if (args.context.volumes != null && args.context.volumes[0].type == 'ROOT') {
                                             args.$form.find('.form-item[rel=newdiskoffering]').hide();
+
+                                            selectedDiskOfferingObj = null;
                                         } else {
                                             args.$form.find('.form-item[rel=newsize]').hide();
                                         }
@@ -2366,10 +2365,8 @@
             }
         }
 
-        if (jsonObj.hypervisor == "KVM" || jsonObj.hypervisor == "XenServer" || jsonObj.hypervisor == "VMware") {
-            if (jsonObj.state == "Ready" || jsonObj.state == "Allocated") {
-                allowedActions.push("resize");
-            }
+        if (jsonObj.state == "Ready" || jsonObj.state == "Allocated") {
+            allowedActions.push("resize");
         }
 
         if (jsonObj.state != "Allocated") {

@@ -49,6 +49,12 @@
                                 return true;
                             }
                             return false;
+                        },
+                        isDisabled: function(args){
+                            if(args.context.instances[0].state == 'Stopped'){
+                                    return true;
+                            }
+                            return false;
                         }
                     },
                     quiescevm: {
@@ -310,7 +316,7 @@
                             return 'label.metrics';
                         }
                     }
-                },
+                }
             },
 
             dataProvider: function(args) {

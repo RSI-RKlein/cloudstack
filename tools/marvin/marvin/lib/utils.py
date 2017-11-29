@@ -19,6 +19,7 @@
 
 import marvin
 import os
+import re
 import time
 import logging
 import string
@@ -489,9 +490,11 @@ def checkVolumeSize(ssh_handle=None,
                 return FAILED
             for line in fdisk_output["stdout"]:
                 if volume_name in line:
-                    parts = line.strip().split()
-                    if str(parts[-2]) == str(size_to_verify):
-                        return [SUCCESS,str(parts[-2])]
+                    # Get the bytes from the output
+                    # Disk /dev/xvdb: 1 GiB, 1073741824 bytes, 2097152 sectors
+                    m = re.match('.*?(\d+) bytes.*', line)
+                    if m and str(m.group(1)) == str(size_to_verify):
+                        return [SUCCESS,str(m.group(1))]
             return [FAILED,"Volume Not Found"]
     except Exception, e:
         print "\n Exception Occurred under getDiskUsage: " \
@@ -521,3 +524,23 @@ def verifyRouterState(apiclient, routerid, allowedstates):
         return [FAIL, "state of the router should be in %s but is %s" %
             (allowedstates, routers[0].state)]
     return [PASS, None]
+
+
+def wait_until(retry_interval=2, no_of_times=2, callback=None, *callback_args):
+    """ Utility method to try out the callback method at most no_of_times with a interval of retry_interval,
+        Will return immediately if callback returns True. The callback method should be written to return a list of values first being a boolean """
+
+    if callback is None:
+        raise ("Bad value for callback method !")
+
+    wait_result = False 
+    for i in range(0,no_of_times):
+        time.sleep(retry_interval)
+        wait_result, return_val = callback(*callback_args)
+        if not(isinstance(wait_result, bool)):
+            raise ("Bad parameter returned from callback !")
+        if wait_result :
+            break
+
+    return wait_result, return_val
+

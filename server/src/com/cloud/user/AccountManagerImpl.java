@@ -133,6 +133,7 @@ import com.cloud.template.TemplateManager;
 import com.cloud.template.VirtualMachineTemplate;
 import com.cloud.user.Account.State;
 import com.cloud.user.dao.AccountDao;
+import com.cloud.user.dao.SSHKeyPairDao;
 import com.cloud.user.dao.UserAccountDao;
 import com.cloud.user.dao.UserDao;
 import com.cloud.utils.ConstantTimeComparator;
@@ -159,6 +160,7 @@ import com.cloud.vm.ReservationContextImpl;
 import com.cloud.vm.UserVmManager;
 import com.cloud.vm.UserVmVO;
 import com.cloud.vm.VMInstanceVO;
+import com.cloud.vm.VirtualMachine;
 import com.cloud.vm.VirtualMachineManager;
 import com.cloud.vm.dao.InstanceGroupDao;
 import com.cloud.vm.dao.UserVmDao;
@@ -261,6 +263,8 @@ public class AccountManagerImpl extends ManagerBase implements AccountManager, M
     private DedicatedResourceDao _dedicatedDao;
     @Inject
     private GlobalLoadBalancerRuleDao _gslbRuleDao;
+    @Inject
+    private SSHKeyPairDao _sshKeyPairDao;
 
     List<QuerySelector> _querySelectors;
 
@@ -755,8 +759,17 @@ public class AccountManagerImpl extends ManagerBase implements AccountManager, M
                 s_logger.debug("Expunging # of vms (accountId=" + accountId + "): " + vms.size());
             }
 
-            // no need to catch exception at this place as expunging vm should pass in order to perform further cleanup
             for (UserVmVO vm : vms) {
+                if (vm.getState() != VirtualMachine.State.Destroyed && vm.getState() != VirtualMachine.State.Expunging) {
+                    try {
+                        _vmMgr.destroyVm(vm.getId());
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        s_logger.warn("Failed destroying instance " + vm.getUuid() + " as part of account deletion.");
+                    }
+                }
+                // no need to catch exception at this place as expunging vm
+                // should pass in order to perform further cleanup
                 if (!_vmMgr.expunge(vm, callerUserId, caller)) {
                     s_logger.error("Unable to expunge vm: " + vm.getId());
                     accountCleanupNeeded = true;
@@ -913,6 +926,12 @@ public class AccountManagerImpl extends ManagerBase implements AccountManager, M
             // Delete resource count and resource limits entries set for this account (if there are any).
             _resourceCountDao.removeEntriesByOwner(accountId, ResourceOwnerType.Account);
             _resourceLimitDao.removeEntriesByOwner(accountId, ResourceOwnerType.Account);
+
+            // Delete ssh keypairs
+            List<SSHKeyPairVO> sshkeypairs = _sshKeyPairDao.listKeyPairs(accountId, account.getDomainId());
+            for (SSHKeyPairVO keypair: sshkeypairs) {
+                _sshKeyPairDao.remove(keypair.getId());
+            }
             return true;
         } catch (Exception ex) {
             s_logger.warn("Failed to cleanup account " + account + " due to ", ex);
@@ -994,9 +1013,9 @@ public class AccountManagerImpl extends ManagerBase implements AccountManager, M
         @ActionEvent(eventType = EventTypes.EVENT_USER_CREATE, eventDescription = "creating User")
     })
     public UserAccount createUserAccount(final String userName, final String password, final String firstName, final String lastName, final String email, final String timezone,
-            String accountName, final short accountType, Long domainId, final String networkDomain, final Map<String, String> details, String accountUUID, final String userUUID) {
+            String accountName, final short accountType, final Long roleId, Long domainId, final String networkDomain, final Map<String, String> details, String accountUUID, final String userUUID) {
 
-        return createUserAccount(userName, password, firstName, lastName, email, timezone, accountName, accountType, domainId, networkDomain, details, accountUUID, userUUID,
+        return createUserAccount(userName, password, firstName, lastName, email, timezone, accountName, accountType, roleId, domainId, networkDomain, details, accountUUID, userUUID,
                 User.Source.UNKNOWN);
     }
 
@@ -1011,7 +1030,7 @@ public class AccountManagerImpl extends ManagerBase implements AccountManager, M
         @ActionEvent(eventType = EventTypes.EVENT_USER_CREATE, eventDescription = "creating User")
     })
     public UserAccount createUserAccount(final String userName, final String password, final String firstName, final String lastName, final String email,
-        final String timezone, String accountName, final short accountType, Long domainId, final String networkDomain, final Map<String, String> details,
+        final String timezone, String accountName, final short accountType, final Long roleId, Long domainId, final String networkDomain, final Map<String, String> details,
         String accountUUID, final String userUUID, final User.Source source) {
 
         if (accountName == null) {
@@ -1065,7 +1084,7 @@ public class AccountManagerImpl extends ManagerBase implements AccountManager, M
                 if (accountUUID == null) {
                     accountUUID = UUID.randomUUID().toString();
                 }
-                AccountVO account = createAccount(accountNameFinal, accountType, domainIdFinal, networkDomain, details, accountUUID);
+                AccountVO account = createAccount(accountNameFinal, accountType, roleId, domainIdFinal, networkDomain, details, accountUUID);
                 long accountId = account.getId();
 
                 // create the first user for the account
@@ -1869,27 +1888,10 @@ public class AccountManagerImpl extends ManagerBase implements AccountManager, M
 
     @Override
     public RoleType getRoleType(Account account) {
-        RoleType roleType = RoleType.Unknown;
-        if (account == null)
-            return roleType;
-        short accountType = account.getType();
-
-        // Account type to role type translation
-        switch (accountType) {
-            case Account.ACCOUNT_TYPE_ADMIN:
-                roleType = RoleType.Admin;
-                break;
-            case Account.ACCOUNT_TYPE_DOMAIN_ADMIN:
-                roleType = RoleType.DomainAdmin;
-                break;
-            case Account.ACCOUNT_TYPE_RESOURCE_DOMAIN_ADMIN:
-                roleType = RoleType.ResourceAdmin;
-                break;
-            case Account.ACCOUNT_TYPE_NORMAL:
-                roleType = RoleType.User;
-                break;
+        if (account == null) {
+            return RoleType.Unknown;
         }
-        return roleType;
+        return RoleType.getByAccountType(account.getType());
     }
 
     @Override
@@ -1916,7 +1918,7 @@ public class AccountManagerImpl extends ManagerBase implements AccountManager, M
 
     @Override
     @DB
-    public AccountVO createAccount(final String accountName, final short accountType, final Long domainId, final String networkDomain, final Map<String, String> details,
+    public AccountVO createAccount(final String accountName, final short accountType, final Long roleId, final Long domainId, final String networkDomain, final Map<String, String> details,
         final String uuid) {
         // Validate domain
         Domain domain = _domainMgr.getDomain(domainId);
@@ -1929,7 +1931,7 @@ public class AccountManagerImpl extends ManagerBase implements AccountManager, M
         }
 
         if ((domainId != Domain.ROOT_DOMAIN) && (accountType == Account.ACCOUNT_TYPE_ADMIN)) {
-            throw new InvalidParameterValueException("Invalid account type " + accountType + " given for an account in domain " + domainId + "; unable to create user.");
+            throw new InvalidParameterValueException("Invalid account type " + accountType + " given for an account in domain " + domainId + "; unable to create user of admin role type in non-ROOT domain.");
         }
 
         // Validate account/user/domain settings
@@ -1961,7 +1963,7 @@ public class AccountManagerImpl extends ManagerBase implements AccountManager, M
         return Transaction.execute(new TransactionCallback<AccountVO>() {
             @Override
             public AccountVO doInTransaction(TransactionStatus status) {
-        AccountVO account = _accountDao.persist(new AccountVO(accountName, domainId, networkDomain, accountType, uuid));
+        AccountVO account = _accountDao.persist(new AccountVO(accountName, domainId, networkDomain, accountType, roleId, uuid));
 
         if (account == null) {
             throw new CloudRuntimeException("Failed to create account name " + accountName + " in domain id=" + domainId);
@@ -2231,12 +2233,16 @@ public class AccountManagerImpl extends ManagerBase implements AccountManager, M
     @DB
     @ActionEvent(eventType = EventTypes.EVENT_REGISTER_FOR_SECRET_API_KEY, eventDescription = "register for the developer API keys")
     public String[] createApiKeyAndSecretKey(RegisterCmd cmd) {
+        Account caller = CallContext.current().getCallingAccount();
         final Long userId = cmd.getId();
 
         User user = getUserIncludingRemoved(userId);
         if (user == null) {
             throw new InvalidParameterValueException("unable to find user by id");
         }
+
+        Account account = _accountDao.findById(user.getAccountId());
+        checkAccess(caller, null, true, account);
 
         // don't allow updating system user
         if (user.getId() == User.UID_SYSTEM) {

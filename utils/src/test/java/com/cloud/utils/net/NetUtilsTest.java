@@ -301,9 +301,15 @@ public class NetUtilsTest {
 
     @Test
     public void testValidateGuestCidr() throws Exception {
-        final String guestCidr = "192.168.1.0/24";
+        final String[] validCidrs = {"10.1.1.1/16", "172.16.1.0/16", "192.168.1.0/24", "100.64.1.0/24"};
+        final String[] invalidCidrs = {"172.33.1.0/16", "100.128.1.0/10"};
 
-        assertTrue(NetUtils.validateGuestCidr(guestCidr));
+        for (String cidr: validCidrs) {
+            assertTrue(NetUtils.validateGuestCidr(cidr));
+        }
+        for (String cidr: invalidCidrs) {
+            assertFalse(NetUtils.validateGuestCidr(cidr));
+        }
     }
 
     @Test
@@ -502,6 +508,19 @@ public class NetUtilsTest {
     @Test
     public void testIsNetworkAWithinNetworkBWithEmptyValues() {
         assertEquals(false, NetUtils.isNetworkAWithinNetworkB("", null));
+    }
+
+    @Test
+    public void testIsNetworkAWithinNetworkB() {
+        assertTrue(NetUtils.isNetworkAWithinNetworkB("192.168.30.0/24", "192.168.30.0/23"));
+        assertTrue(NetUtils.isNetworkAWithinNetworkB("192.168.30.0/24", "192.168.30.0/22"));
+        assertFalse(NetUtils.isNetworkAWithinNetworkB("192.168.30.0/23", "192.168.30.0/24"));
+        assertFalse(NetUtils.isNetworkAWithinNetworkB("192.168.30.0/22", "192.168.30.0/24"));
+        assertTrue(NetUtils.isNetworkAWithinNetworkB("192.168.28.0/24", "192.168.28.0/23"));
+        assertTrue(NetUtils.isNetworkAWithinNetworkB("192.168.28.0/24", "192.168.28.0/22"));
+        assertFalse(NetUtils.isNetworkAWithinNetworkB("192.168.28.0/23", "192.168.28.0/24"));
+        assertFalse(NetUtils.isNetworkAWithinNetworkB("192.168.28.0/22", "192.168.28.0/24"));
+        assertTrue(NetUtils.isNetworkAWithinNetworkB("192.168.30.0/24", "192.168.28.0/22"));
     }
 
     @Test

@@ -29,6 +29,9 @@ import java.net.URISyntaxException;
 import java.net.URL;
 import java.net.URLConnection;
 import java.nio.charset.Charset;
+
+import org.apache.commons.collections.MapUtils;
+import org.joda.time.Duration;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
@@ -37,6 +40,7 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Properties;
 import java.util.Queue;
 import java.util.Random;
@@ -44,7 +48,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeoutException;
 
-import javax.ejb.Local;
 import javax.naming.ConfigurationException;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
@@ -97,6 +100,7 @@ import com.cloud.agent.api.to.IpAddressTO;
 import com.cloud.agent.api.to.NfsTO;
 import com.cloud.agent.api.to.NicTO;
 import com.cloud.agent.api.to.VirtualMachineTO;
+import com.cloud.agent.resource.virtualnetwork.VRScripts;
 import com.cloud.agent.resource.virtualnetwork.VirtualRouterDeployer;
 import com.cloud.agent.resource.virtualnetwork.VirtualRoutingResource;
 import com.cloud.exception.InternalErrorException;
@@ -164,11 +168,17 @@ import com.xensource.xenapi.XenAPIObject;
  * before you do any changes in this code here.
  *
  */
-@Local(value = ServerResource.class)
 public abstract class CitrixResourceBase implements ServerResource, HypervisorResource, VirtualRouterDeployer {
-
+    /**
+     * used to describe what type of resource a storage device is of
+     */
     public enum SRType {
-        EXT, FILE, ISCSI, ISO, LVM, LVMOHBA, LVMOISCSI, NFS;
+        EXT, FILE, ISCSI, ISO, LVM, LVMOHBA, LVMOISCSI,
+        /**
+         * used for resigning metadata (like SR UUID and VDI UUID when a
+         * particular storage manager is installed on a XenServer host (for back-end snapshots to work))
+         */
+        RELVMOISCSI, NFS;
 
         String _str;
 
@@ -185,6 +195,8 @@ public abstract class CitrixResourceBase implements ServerResource, HypervisorRe
             return _str;
         }
     }
+
+    private final static int BASE_TO_CONVERT_BYTES_INTO_KILOBYTES = 1024;
 
     protected static final XenServerConnectionPool ConnPool = XenServerConnectionPool.getInstance();
     // static min values for guests on xenserver
@@ -1139,8 +1151,8 @@ public abstract class CitrixResourceBase implements ServerResource, HypervisorRe
             vbdr.unpluggable = (volume.getType() == Volume.Type.ROOT) ? false : true;
             vbdr.userdevice = "autodetect";
             final Long deviceId = volume.getDiskSeq();
-            if (deviceId != null && !isDeviceUsed(conn, vm, deviceId)) {
-                vbdr.userdevice = deviceId.toString();
+            if (deviceId != null && (!isDeviceUsed(conn, vm, deviceId) || deviceId > 3)) {
+                    vbdr.userdevice = deviceId.toString();
             }
         }
         final VBD vbd = VBD.create(conn, vbdr);
@@ -1232,7 +1244,7 @@ public abstract class CitrixResourceBase implements ServerResource, HypervisorRe
     }
 
     public VM createVmFromTemplate(final Connection conn, final VirtualMachineTO vmSpec, final Host host) throws XenAPIException, XmlRpcException {
-        final String guestOsTypeName = getGuestOsType(vmSpec.getOs(), vmSpec.getPlatformEmulator(), vmSpec.getBootloader() == BootloaderType.CD);
+        final String guestOsTypeName = getGuestOsType(vmSpec.getPlatformEmulator());
         final Set<VM> templates = VM.getByNameLabel(conn, guestOsTypeName);
         if (templates == null || templates.isEmpty()) {
             throw new CloudRuntimeException("Cannot find template " + guestOsTypeName + " on XenServer host");
@@ -1337,7 +1349,7 @@ public abstract class CitrixResourceBase implements ServerResource, HypervisorRe
                         final TemplateObjectTO iso = (TemplateObjectTO) disk.getData();
                         final String osType = iso.getGuestOsType();
                         if (osType != null) {
-                            final String isoGuestOsName = getGuestOsType(osType, vmSpec.getPlatformEmulator(), vmSpec.getBootloader() == BootloaderType.CD);
+                            final String isoGuestOsName = getGuestOsType(vmSpec.getPlatformEmulator());
                             if (!isoGuestOsName.equals(guestOsTypeName)) {
                                 vmSpec.setBootloader(BootloaderType.PyGrub);
                             }
@@ -1352,6 +1364,7 @@ public abstract class CitrixResourceBase implements ServerResource, HypervisorRe
                 }
             } else if (vmSpec.getBootloader() == BootloaderType.PyGrub) {
                 vm.setPVBootloader(conn, "pygrub");
+                vm.setPVBootloaderArgs(conn,CitrixHelper.getPVbootloaderArgs(guestOsTypeName));
             } else {
                 vm.destroy(conn);
                 throw new CloudRuntimeException("Unable to handle boot loader type: " + vmSpec.getBootloader());
@@ -1404,6 +1417,10 @@ public abstract class CitrixResourceBase implements ServerResource, HypervisorRe
             vbdr.userdevice = "autodetect";
             vbdr.mode = Types.VbdMode.RW;
             vbdr.type = Types.VbdType.DISK;
+            Long deviceId = volumeTO.getDeviceId();
+            if (deviceId != null && (!isDeviceUsed(conn, vm, deviceId) || deviceId > 3)) {
+                vbdr.userdevice = deviceId.toString();
+            }
             VBD.create(conn, vbdr);
         }
         return vm;
@@ -1651,18 +1668,18 @@ public abstract class CitrixResourceBase implements ServerResource, HypervisorRe
     @Override
     public ExecutionResult executeInVR(final String routerIP, final String script, final String args) {
         // Timeout is 120 seconds by default
-        return executeInVR(routerIP, script, args, 120);
+        return executeInVR(routerIP, script, args, VRScripts.VR_SCRIPT_EXEC_TIMEOUT);
     }
 
     @Override
-    public ExecutionResult executeInVR(final String routerIP, final String script, final String args, final int timeout) {
+    public ExecutionResult executeInVR(final String routerIP, final String script, final String args, final Duration timeout) {
         Pair<Boolean, String> result;
         String cmdline = "/opt/cloud/bin/router_proxy.sh " + script + " " + routerIP + " " + args;
         // semicolon need to be escape for bash
         cmdline = cmdline.replaceAll(";", "\\\\;");
         try {
             s_logger.debug("Executing command in VR: " + cmdline);
-            result = SshHelper.sshExecute(_host.getIp(), 22, _username, null, _password.peek(), cmdline, 60000, 60000, timeout * 1000);
+            result = SshHelper.sshExecute(_host.getIp(), 22, _username, null, _password.peek(), cmdline, VRScripts.CONNECTION_TIMEOUT, VRScripts.CONNECTION_TIMEOUT, timeout);
         } catch (final Exception e) {
             return new ExecutionResult(false, e.getMessage());
         }
@@ -1793,10 +1810,26 @@ public abstract class CitrixResourceBase implements ServerResource, HypervisorRe
             cmd.setPod(_pod);
             cmd.setVersion(CitrixResourceBase.class.getPackage().getImplementationVersion());
 
+            try {
+                final String cmdLine = "xe sm-list | grep \"resigning of duplicates\"";
+
+                final XenServerUtilitiesHelper xenServerUtilitiesHelper = getXenServerUtilitiesHelper();
+
+                Pair<Boolean, String> result = xenServerUtilitiesHelper.executeSshWrapper(_host.getIp(), 22, _username, null, getPwdFromQueue(), cmdLine);
+
+                boolean supportsClonedVolumes = result != null && result.first() != null && result.first() &&
+                        result.second() != null && result.second().length() > 0;
+
+                cmd.setSupportsClonedVolumes(supportsClonedVolumes);
+            } catch (NumberFormatException ex) {
+                s_logger.warn("Issue sending 'xe sm-list' via SSH to XenServer host: " + ex.getMessage());
+            }
         } catch (final XmlRpcException e) {
-            throw new CloudRuntimeException("XML RPC Exception" + e.getMessage(), e);
+            throw new CloudRuntimeException("XML RPC Exception: " + e.getMessage(), e);
         } catch (final XenAPIException e) {
-            throw new CloudRuntimeException("XenAPIException" + e.toString(), e);
+            throw new CloudRuntimeException("XenAPIException: " + e.toString(), e);
+        } catch (final Exception e) {
+            throw new CloudRuntimeException("Exception: " + e.toString(), e);
         }
     }
 
@@ -2018,8 +2051,8 @@ public abstract class CitrixResourceBase implements ServerResource, HypervisorRe
         return null;
     }
 
-    protected String getGuestOsType(final String stdType, String platformEmulator, final boolean bootFromCD) {
-        if (platformEmulator == null) {
+    protected String getGuestOsType(String platformEmulator) {
+        if (org.apache.commons.lang.StringUtils.isBlank(platformEmulator)) {
             s_logger.debug("no guest OS type, start it as HVM guest");
             platformEmulator = "Other install media";
         }
@@ -2263,6 +2296,11 @@ public abstract class CitrixResourceBase implements ServerResource, HypervisorRe
 
     public SR getIscsiSR(final Connection conn, final String srNameLabel, final String target, String path, final String chapInitiatorUsername,
             final String chapInitiatorPassword, final boolean ignoreIntroduceException) {
+        return getIscsiSR(conn, srNameLabel, target, path, chapInitiatorUsername, chapInitiatorPassword, false, ignoreIntroduceException);
+    }
+
+    public SR getIscsiSR(final Connection conn, final String srNameLabel, final String target, String path, final String chapInitiatorUsername,
+            final String chapInitiatorPassword, final boolean resignature, final boolean ignoreIntroduceException) {
         synchronized (srNameLabel.intern()) {
             final Map<String, String> deviceConfig = new HashMap<String, String>();
             try {
@@ -2352,17 +2390,52 @@ public abstract class CitrixResourceBase implements ServerResource, HypervisorRe
                         throw new CloudRuntimeException(msg, e);
                     }
                 }
+
                 deviceConfig.put("SCSIid", scsiid);
 
-                final String result = SR.probe(conn, host, deviceConfig, type, smConfig);
+                String result = SR.probe(conn, host, deviceConfig, type, smConfig);
+
                 String pooluuid = null;
+
                 if (result.indexOf("<UUID>") != -1) {
                     pooluuid = result.substring(result.indexOf("<UUID>") + 6, result.indexOf("</UUID>")).trim();
                 }
 
                 if (pooluuid == null || pooluuid.length() != 36) {
                     sr = SR.create(conn, host, deviceConfig, new Long(0), srNameLabel, srNameLabel, type, "user", true, smConfig);
-                } else {
+                }
+                else {
+                    if (resignature) {
+                        try {
+                            SR.create(conn, host, deviceConfig, new Long(0), srNameLabel, srNameLabel, SRType.RELVMOISCSI.toString(), "user", true, smConfig);
+
+                            // The successful outcome of SR.create (right above) is to throw an exception of type XenAPIException (with expected
+                            // toString() text) after resigning the metadata (we indicated to perform a resign by passing in SRType.RELVMOISCSI.toString()).
+                            // That being the case, if this CloudRuntimeException statement is executed, there appears to have been some kind
+                            // of failure in the execution of the above SR.create (resign) method.
+                            throw new CloudRuntimeException("Problem resigning the metadata");
+                        }
+                        catch (XenAPIException ex) {
+                            String msg = ex.toString();
+
+                            if (!msg.contains("successfully resigned")) {
+                                throw ex;
+                            }
+
+                            result = SR.probe(conn, host, deviceConfig, type, smConfig);
+
+                            pooluuid = null;
+
+                            if (result.indexOf("<UUID>") != -1) {
+                                pooluuid = result.substring(result.indexOf("<UUID>") + 6, result.indexOf("</UUID>")).trim();
+                            }
+
+                            if (pooluuid == null || pooluuid.length() != 36) {
+                                throw new CloudRuntimeException("Non-existent or invalid SR UUID");
+                            }
+                        }
+                    }
+
                     try {
                         sr = SR.introduce(conn, pooluuid, srNameLabel, srNameLabel, type, "user", true, smConfig);
                     } catch (final XenAPIException ex) {
@@ -2374,11 +2447,15 @@ public abstract class CitrixResourceBase implements ServerResource, HypervisorRe
                     }
 
                     final Set<Host> setHosts = Host.getAll(conn);
+
                     if (setHosts == null) {
-                        final String msg = "Unable to create Iscsi SR  " + deviceConfig + " due to hosts not available.";
+                        final String msg = "Unable to create iSCSI SR " + deviceConfig + " due to hosts not available.";
+
                         s_logger.warn(msg);
+
                         throw new CloudRuntimeException(msg);
                     }
+
                     for (final Host currentHost : setHosts) {
                         final PBD.Record rec = new PBD.Record();
 
@@ -2391,7 +2468,9 @@ public abstract class CitrixResourceBase implements ServerResource, HypervisorRe
                         pbd.plug(conn);
                     }
                 }
+
                 sr.scan(conn);
+
                 return sr;
             } catch (final XenAPIException e) {
                 final String msg = "Unable to create Iscsi SR  " + deviceConfig + " due to  " + e.toString();
@@ -3277,7 +3356,7 @@ public abstract class CitrixResourceBase implements ServerResource, HypervisorRe
         final HashMap<String, VmStatsEntry> vmResponseMap = new HashMap<String, VmStatsEntry>();
 
         for (final String vmUUID : vmUUIDs) {
-            vmResponseMap.put(vmUUID, new VmStatsEntry(0, 0, 0, 0, "vm"));
+            vmResponseMap.put(vmUUID, new VmStatsEntry(0,0,0,0, 0, 0, 0, "vm"));
         }
 
         final Object[] rrdData = getRRDData(conn, 2); // call rrddata with 2 for
@@ -3324,14 +3403,21 @@ public abstract class CitrixResourceBase implements ServerResource, HypervisorRe
                     vmStatsAnswer.setNumCPUs(vmStatsAnswer.getNumCPUs() + 1);
                     vmStatsAnswer.setCPUUtilization(vmStatsAnswer.getCPUUtilization() + getDataAverage(dataNode, col, numRows));
                 } else if (param.matches("vif_\\d*_rx")) {
-                    vmStatsAnswer.setNetworkReadKBs(vmStatsAnswer.getNetworkReadKBs() + getDataAverage(dataNode, col, numRows) / 1000);
+                    vmStatsAnswer.setNetworkReadKBs(vmStatsAnswer.getNetworkReadKBs() + getDataAverage(dataNode, col, numRows) / BASE_TO_CONVERT_BYTES_INTO_KILOBYTES);
                 } else if (param.matches("vif_\\d*_tx")) {
-                    vmStatsAnswer.setNetworkWriteKBs(vmStatsAnswer.getNetworkWriteKBs() + getDataAverage(dataNode, col, numRows) / 1000);
+                    vmStatsAnswer.setNetworkWriteKBs(vmStatsAnswer.getNetworkWriteKBs() + getDataAverage(dataNode, col, numRows) / BASE_TO_CONVERT_BYTES_INTO_KILOBYTES);
                 } else if (param.matches("vbd_.*_read")) {
-                    vmStatsAnswer.setDiskReadKBs(vmStatsAnswer.getDiskReadKBs() + getDataAverage(dataNode, col, numRows) / 1000);
+                    vmStatsAnswer.setDiskReadKBs(vmStatsAnswer.getDiskReadKBs() + getDataAverage(dataNode, col, numRows) / BASE_TO_CONVERT_BYTES_INTO_KILOBYTES);
                 } else if (param.matches("vbd_.*_write")) {
-                    vmStatsAnswer.setDiskWriteKBs(vmStatsAnswer.getDiskWriteKBs() + getDataAverage(dataNode, col, numRows) / 1000);
+                    vmStatsAnswer.setDiskWriteKBs(vmStatsAnswer.getDiskWriteKBs() + getDataAverage(dataNode, col, numRows) / BASE_TO_CONVERT_BYTES_INTO_KILOBYTES);
+                } else if (param.contains("memory_internal_free")) {
+                    vmStatsAnswer.setIntFreeMemoryKBs(vmStatsAnswer.getIntFreeMemoryKBs() + getDataAverage(dataNode, col, numRows) / BASE_TO_CONVERT_BYTES_INTO_KILOBYTES);
+                } else if (param.contains("memory_target")) {
+                    vmStatsAnswer.setTargetMemoryKBs(vmStatsAnswer.getTargetMemoryKBs() + getDataAverage(dataNode, col, numRows) / BASE_TO_CONVERT_BYTES_INTO_KILOBYTES);
+                } else if (param.contains("memory")) {
+                    vmStatsAnswer.setMemoryKBs(vmStatsAnswer.getMemoryKBs() + getDataAverage(dataNode, col, numRows) / BASE_TO_CONVERT_BYTES_INTO_KILOBYTES);
                 }
+
             }
         }
 
@@ -3347,6 +3433,7 @@ public abstract class CitrixResourceBase implements ServerResource, HypervisorRe
                 s_logger.debug("Vm cpu utilization " + vmStatsAnswer.getCPUUtilization());
             }
         }
+
         return vmResponseMap;
     }
 
@@ -3960,11 +4047,9 @@ public abstract class CitrixResourceBase implements ServerResource, HypervisorRe
         }
     }
 
-    // the idea here is to see if the DiskTO in question is from managed storage
-    // and
-    // does not yet have an SR
-    // if no SR, create it and create a VDI in it
-    public VDI prepareManagedDisk(final Connection conn, final DiskTO disk, final String vmName) throws Exception {
+    // The idea here is to see if the DiskTO in question is from managed storage and does not yet have an SR.
+    // If no SR, create it and create a VDI in it.
+    public VDI prepareManagedDisk(final Connection conn, final DiskTO disk, final long vmId, final String vmName) throws Exception {
         final Map<String, String> details = disk.getDetails();
 
         if (details == null) {
@@ -3985,7 +4070,7 @@ public abstract class CitrixResourceBase implements ServerResource, HypervisorRe
             return null;
         }
 
-        final String vdiNameLabel = vmName + "-DATA";
+        final String vdiNameLabel = Volume.Type.ROOT.equals(disk.getType()) ? ("ROOT-" + vmId) : (vmName + "-DATA");
 
         return prepareManagedStorage(conn, details, null, vdiNameLabel);
     }
@@ -4015,24 +4100,39 @@ public abstract class CitrixResourceBase implements ServerResource, HypervisorRe
         VDI vdi = getVDIbyUuid(conn, path, false);
         final Long volumeSize = Long.parseLong(details.get(DiskTO.VOLUME_SIZE));
 
+        Set<VDI> vdisInSr = sr.getVDIs(conn);
+
+        // If a VDI already exists in the SR (in case we cloned from a template cache), use that.
+        if (vdisInSr.size() == 1) {
+            vdi = vdisInSr.iterator().next();
+        }
+
         if (vdi == null) {
             vdi = createVdi(sr, vdiNameLabel, volumeSize);
         } else {
-            // if VDI is not null, it must have already been created, so check
-            // whether a resize of the volume was performed
-            // if true, resize the VDI to the volume size
+            // If vdi is not null, it must have already been created, so check whether a resize of the volume was performed.
+            // If true, resize the VDI to the volume size.
 
-            s_logger.info("checking for the resize of the datadisk");
+            s_logger.info("Checking for the resize of the datadisk");
 
             final long vdiVirtualSize = vdi.getVirtualSize(conn);
 
             if (vdiVirtualSize != volumeSize) {
-                s_logger.info("resizing the data disk (vdi) from vdiVirtualsize: " + vdiVirtualSize + " to volumeSize: " + volumeSize);
+                s_logger.info("Resizing the data disk (VDI) from vdiVirtualSize: " + vdiVirtualSize + " to volumeSize: " + volumeSize);
 
                 try {
                     vdi.resize(conn, volumeSize);
                 } catch (final Exception e) {
                     s_logger.warn("Unable to resize volume", e);
+                }
+            }
+
+            // change the name-label in case of a cloned VDI
+            if (!Objects.equals(vdi.getNameLabel(conn), vdiNameLabel)) {
+                try {
+                    vdi.setNameLabel(conn, vdiNameLabel);
+                } catch (final Exception e) {
+                    s_logger.warn("Unable to rename volume", e);
                 }
             }
         }
@@ -4254,6 +4354,30 @@ public abstract class CitrixResourceBase implements ServerResource, HypervisorRe
                 }
             }
         }
+    }
+
+    protected void skipOrRemoveSR(Connection conn, SR sr) {
+        if (sr == null) {
+            return;
+        }
+        if (s_logger.isDebugEnabled()) {
+            s_logger.debug(logX(sr, "Removing SR"));
+        }
+        try {
+            Set<VDI> vdis = sr.getVDIs(conn);
+            for (VDI vdi : vdis) {
+                if (MapUtils.isEmpty(vdi.getCurrentOperations(conn))) {
+                    continue;
+                }
+                return;
+            }
+            removeSR(conn, sr);
+            return;
+        } catch (XenAPIException | XmlRpcException e) {
+            s_logger.warn(logX(sr, "Unable to get current opertions " + e.toString()), e);
+        }
+        String msg = "Remove SR failed";
+        s_logger.warn(msg);
     }
 
     public void removeSR(final Connection conn, final SR sr) {
@@ -4738,10 +4862,15 @@ public abstract class CitrixResourceBase implements ServerResource, HypervisorRe
         return null;
     }
 
-    public void shutdownVM(final Connection conn, final VM vm, final String vmName) throws XmlRpcException {
+    public void shutdownVM(final Connection conn, final VM vm, final String vmName, final boolean forcedStop) throws XmlRpcException {
         Task task = null;
         try {
-            task = vm.cleanShutdownAsync(conn);
+            if (forcedStop) {
+                task = vm.hardShutdownAsync(conn);
+            } else {
+                task = vm.cleanShutdownAsync(conn);
+            }
+
             try {
                 // poll every 1 seconds , timeout after 10 minutes
                 waitForTask(conn, task, 1000, 10 * 60 * 1000);
@@ -4754,7 +4883,7 @@ public abstract class CitrixResourceBase implements ServerResource, HypervisorRe
                 throw new CloudRuntimeException("Shutdown VM catch HandleInvalid and VM is not in HALTED state");
             }
         } catch (final XenAPIException e) {
-            s_logger.debug("Unable to cleanShutdown VM(" + vmName + ") on host(" + _host.getUuid() + ") due to " + e.toString());
+            s_logger.debug("Unable to shutdown VM(" + vmName + ") with force=" + forcedStop + " on host(" + _host.getUuid() + ") due to " + e.toString());
             try {
                 VmPowerState state = vm.getPowerState(conn);
                 if (state == VmPowerState.RUNNING) {

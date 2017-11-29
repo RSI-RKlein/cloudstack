@@ -100,36 +100,25 @@ public class Xenserver625StorageProcessor extends XenServerStorageProcessor {
         PBD pbd = null;
 
         try {
-            final String srname = hypervisorResource.getHost().getUuid() + path.trim();
-
-            final Set<SR> srs = SR.getByNameLabel(conn, srname);
-
-            if (srs != null && !srs.isEmpty()) {
-                return srs.iterator().next();
+            final String srname = path.trim();
+            synchronized (srname.intern()) {
+                final Set<SR> srs = SR.getByNameLabel(conn, srname);
+                if (srs != null && !srs.isEmpty()) {
+                    return srs.iterator().next();
+                }
+                final Map<String, String> smConfig = new HashMap<String, String>();
+                final Host host = Host.getByUuid(conn, hypervisorResource.getHost().getUuid());
+                final String uuid = UUID.randomUUID().toString();
+                sr = SR.introduce(conn, uuid, srname, srname, "file", "file", false, smConfig);
+                final PBD.Record record = new PBD.Record();
+                record.host = host;
+                record.SR = sr;
+                smConfig.put("location", path);
+                record.deviceConfig = smConfig;
+                pbd = PBD.create(conn, record);
+                pbd.plug(conn);
+                sr.scan(conn);
             }
-
-            final Map<String, String> smConfig = new HashMap<String, String>();
-
-            final Host host = Host.getByUuid(conn, hypervisorResource.getHost().getUuid());
-            final String uuid = UUID.randomUUID().toString();
-
-            sr = SR.introduce(conn, uuid, srname, srname, "file", "file", false, smConfig);
-
-            final PBD.Record record = new PBD.Record();
-
-            record.host = host;
-            record.SR = sr;
-
-            smConfig.put("location", path);
-
-            record.deviceConfig = smConfig;
-
-            pbd = PBD.create(conn, record);
-
-            pbd.plug(conn);
-
-            sr.scan(conn);
-
             return sr;
         } catch (final Exception ex) {
             try {
@@ -171,6 +160,8 @@ public class Xenserver625StorageProcessor extends XenServerStorageProcessor {
         final DataStoreTO srcStore = srcData.getDataStore();
         final Connection conn = hypervisorResource.getConnection();
         SR srcSr = null;
+        SR destSr = null;
+        boolean removeSrAfterCopy = false;
         Task task = null;
 
         try {
@@ -198,7 +189,8 @@ public class Xenserver625StorageProcessor extends XenServerStorageProcessor {
                 final Set<VDI> setVdis = srcSr.getVDIs(conn);
 
                 if (setVdis.size() != 1) {
-                    return new CopyCmdAnswer("Expected 1 VDI template but found " + setVdis.size() + " VDI template(s) on: " + uri.getHost() + ":" + uri.getPath() + "/" + volumeDirectory);
+                    return new CopyCmdAnswer("Expected 1 VDI template, but found " + setVdis.size() + " VDI templates on: " +
+                            uri.getHost() + ":" + uri.getPath() + "/" + volumeDirectory);
                 }
 
                 final VDI srcVdi = setVdis.iterator().next();
@@ -225,10 +217,9 @@ public class Xenserver625StorageProcessor extends XenServerStorageProcessor {
                         managedStoragePoolRootVolumeSize = details.get(PrimaryDataStoreTO.VOLUME_SIZE);
                         chapInitiatorUsername = details.get(PrimaryDataStoreTO.CHAP_INITIATOR_USERNAME);
                         chapInitiatorSecret = details.get(PrimaryDataStoreTO.CHAP_INITIATOR_SECRET);
+                        removeSrAfterCopy = Boolean.parseBoolean(details.get(PrimaryDataStoreTO.REMOVE_AFTER_COPY));
                     }
                 }
-
-                final SR destSr;
 
                 if (managed) {
                     details = new HashMap<String, String>();
@@ -291,9 +282,11 @@ public class Xenserver625StorageProcessor extends XenServerStorageProcessor {
 
                 newVol.setUuid(uuidToReturn);
                 newVol.setPath(uuidToReturn);
+
                 if (physicalSize != null) {
                     newVol.setSize(physicalSize);
                 }
+
                 newVol.setFormat(Storage.ImageFormat.VHD);
 
                 return new CopyCmdAnswer(newVol);
@@ -315,6 +308,10 @@ public class Xenserver625StorageProcessor extends XenServerStorageProcessor {
 
             if (srcSr != null) {
                 hypervisorResource.removeSR(conn, srcSr);
+            }
+
+            if (removeSrAfterCopy && destSr != null) {
+                hypervisorResource.removeSR(conn, destSr);
             }
         }
 
@@ -352,6 +349,7 @@ public class Xenserver625StorageProcessor extends XenServerStorageProcessor {
                 hypervisorResource.waitForTask(conn, task, 1000, wait * 1000);
                 hypervisorResource.checkForSuccess(conn, task);
                 dvdi = Types.toVDI(task, conn);
+                ssSR.scan(conn);
                 // copied = true;
             } finally {
                 if (task != null) {
@@ -465,6 +463,7 @@ public class Xenserver625StorageProcessor extends XenServerStorageProcessor {
                     hypervisorResource.checkForSuccess(conn, task);
                     final VDI backedVdi = Types.toVDI(task, conn);
                     snapshotBackupUuid = backedVdi.getUuid(conn);
+                    snapshotSr.scan(conn);
                     physicalSize = backedVdi.getPhysicalUtilisation(conn);
 
                     if (destStore instanceof SwiftTO) {
@@ -544,6 +543,9 @@ public class Xenserver625StorageProcessor extends XenServerStorageProcessor {
             } else {
                 newSnapshot.setParentSnapshotPath(prevBackupUuid);
             }
+            s_logger.info("New snapshot details: " + newSnapshot.toString());
+            s_logger.info("New snapshot physical utilization: "+physicalSize);
+
             return new CopyCmdAnswer(newSnapshot);
         } catch (final Types.XenAPIException e) {
             details = "BackupSnapshot Failed due to " + e.toString();
@@ -741,7 +743,7 @@ public class Xenserver625StorageProcessor extends XenServerStorageProcessor {
             s_logger.warn(details, e);
         } finally {
             if (srcSr != null) {
-                hypervisorResource.removeSR(conn, srcSr);
+                hypervisorResource.skipOrRemoveSR(conn, srcSr);
             }
             if (!result && destVdi != null) {
                 try {
