@@ -78,6 +78,35 @@ class needscleanup(object):
         return _wrapper
 
 
+class gherkin(object):
+    BLACK = "\033[0;30m"
+    BLUE = "\033[0;34m"
+    GREEN = "\033[0;32m"
+    CYAN = "\033[0;36m"
+    RED = "\033[0;31m"
+    BOLDBLUE = "\033[1;34m"
+    NORMAL = "\033[0m"
+
+    def __init__(self, method):
+        self.method = method
+
+    def __get__(self, obj=None, objtype=None):
+        @functools.wraps(self.method)
+        def _wrapper(*args, **kwargs):
+            gherkin_step = self.method.__name__.replace("_", " ").capitalize()
+            obj.info("=G= %s%s%s" % (self.BOLDBLUE, gherkin_step, self.NORMAL))
+            try:
+                result = self.method(obj, *args, **kwargs)
+                obj.info("=G= %s%s: [SUCCESS]%s" %
+                         (self.GREEN, gherkin_step, self.NORMAL))
+                return result
+            except Exception as e:
+                obj.info("=G= %s%s: [FAILED]%s%s" %
+                         (self.RED, gherkin_step, self.NORMAL, e))
+                raise
+        return _wrapper
+
+
 class nuageTestCase(cloudstackTestCase):
 
     @classmethod
@@ -905,7 +934,8 @@ class nuageTestCase(cloudstackTestCase):
     # verify_vsd_network - Verifies the given CloudStack domain and network/VPC
     # against the corresponding installed enterprise, domain, zone, and subnet
     # in VSD
-    def verify_vsd_network(self, domain_id, network, vpc=None):
+    def verify_vsd_network(self, domain_id, network, vpc=None,
+                           domain_template_name=None):
         self.debug("Verifying the creation and state of Network - %s in VSD" %
                    network.name)
         vsd_enterprise = self.vsd.get_enterprise(
@@ -919,6 +949,18 @@ class nuageTestCase(cloudstackTestCase):
         self.assertEqual(vsd_enterprise.name, domain_id,
                          "VSD enterprise name should match CloudStack domain "
                          "uuid"
+                         )
+        if domain_template_name:
+            vsd_domain_template = self.vsd.get_domain_template(
+                enterprise=vsd_enterprise,
+                filter=self.vsd.set_name_filter(domain_template_name))
+        else:
+            vsd_domain_template = self.vsd.get_domain_template(
+                enterprise=vsd_enterprise,
+                filter=ext_network_filter)
+        self.assertEqual(vsd_domain.template_id, vsd_domain_template.id,
+                         "VSD domain should be instantiated from appropriate "
+                         "domain template"
                          )
         if vpc:
             self.assertEqual(vsd_domain.description, "VPC_" + vpc.name,

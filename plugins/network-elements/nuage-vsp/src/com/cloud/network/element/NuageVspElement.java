@@ -29,6 +29,7 @@ import javax.annotation.Nullable;
 import javax.inject.Inject;
 import javax.naming.ConfigurationException;
 
+import org.apache.commons.lang3.StringUtils;
 import net.nuage.vsp.acs.client.api.model.VspAclRule;
 import net.nuage.vsp.acs.client.api.model.VspDhcpDomainOption;
 import net.nuage.vsp.acs.client.api.model.VspNetwork;
@@ -58,6 +59,7 @@ import com.cloud.agent.api.StartupCommand;
 import com.cloud.agent.api.StartupVspCommand;
 import com.cloud.agent.api.element.ApplyAclRuleVspCommand;
 import com.cloud.agent.api.element.ApplyStaticNatVspCommand;
+import com.cloud.agent.api.element.ExtraDhcpOptionsVspCommand;
 import com.cloud.agent.api.element.ImplementVspCommand;
 import com.cloud.agent.api.element.ShutDownVpcVspCommand;
 import com.cloud.agent.api.element.ShutDownVspCommand;
@@ -121,6 +123,7 @@ import com.cloud.util.NuageVspEntityBuilder;
 import com.cloud.util.NuageVspUtil;
 import com.cloud.utils.Pair;
 import com.cloud.utils.component.AdapterBase;
+import com.cloud.utils.exception.CloudRuntimeException;
 import com.cloud.utils.net.NetUtils;
 import com.cloud.vm.DomainRouterVO;
 import com.cloud.vm.NicProfile;
@@ -250,7 +253,8 @@ public class NuageVspElement extends AdapterBase implements ConnectivityProvider
                     Capability.MultipleIps, "true"
             ))
             .put(Service.Dhcp, ImmutableMap.of(
-                    Capability.DhcpAccrossMultipleSubnets, "true"
+                    Capability.DhcpAccrossMultipleSubnets, "true",
+                    Capability.ExtraDhcpOptions, "true"
             ))
             .put(Service.NetworkACL, ImmutableMap.of(
                     Capability.SupportedProtocols, "tcp,udp,icmp"
@@ -513,6 +517,23 @@ public class NuageVspElement extends AdapterBase implements ConnectivityProvider
         return true;
     }
 
+    @Override
+    public boolean setExtraDhcpOptions(Network network, long nicId, Map<Integer, String> dhcpOptions) {
+        VspNetwork vspNetwork = _nuageVspEntityBuilder.buildVspNetwork(network);
+        HostVO nuageVspHost = _nuageVspManager.getNuageVspHost(network.getPhysicalNetworkId());
+        NicVO nic = _nicDao.findById(nicId);
+
+        ExtraDhcpOptionsVspCommand extraDhcpOptionsVspCommand = new ExtraDhcpOptionsVspCommand(vspNetwork, nic.getUuid(), dhcpOptions);
+        Answer answer = _agentMgr.easySend(nuageVspHost.getId(), extraDhcpOptionsVspCommand);
+
+        if (answer == null || !answer.getResult()) {
+            s_logger.error("[setExtraDhcpOptions] setting extra DHCP options for nic " + nic.getUuid() + " failed.");
+            return false;
+        }
+
+        return true;
+    }
+
 
     @Override
     public boolean applyStaticNats(Network config, List<? extends StaticNat> rules) throws ResourceUnavailableException {
@@ -655,6 +676,12 @@ public class NuageVspElement extends AdapterBase implements ConnectivityProvider
                 s_logger.warn(String.format("NuageVsp doesn't support provider %s for service %s for VPCs", provider.getName(), service.getName()));
                 return false;
             }
+        }
+
+        String globalDomainTemplate = _nuageVspManager.NuageVspVpcDomainTemplateName.value();
+        if (StringUtils.isNotBlank(globalDomainTemplate) && !_nuageVspManager.checkIfDomainTemplateExist(vpc.getDomainId(),globalDomainTemplate,vpc.getZoneId(),null)) {
+            s_logger.warn("The global pre configured domain template does not exist on the VSD.");
+            throw new CloudRuntimeException("The global pre configured domain template does not exist on the VSD.");
         }
 
         return true;

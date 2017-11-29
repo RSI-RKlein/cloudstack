@@ -19,6 +19,22 @@
 -- Schema upgrade from 4.10.0.0 to 4.11.0.0
 --;
 
+-- Add For VPC flag
+ALTER TABLE cloud.network_offerings ADD COLUMN for_vpc INT(1) NOT NULL DEFAULT 0;
+UPDATE cloud.network_offerings o
+SET for_vpc = 1
+where
+  o.conserve_mode = 0
+  and o.guest_type = 'Isolated'
+  and exists(
+    SELECT id
+    from cloud.ntwk_offering_service_map
+    where network_offering_id = o.id and (
+      provider in ('VpcVirtualRouter', 'InternalLbVm', 'JuniperContrailVpcRouter')
+      or service in ('NetworkACL')
+    )
+  );
+  
 --Alter view template_view
  
 DROP VIEW IF EXISTS `cloud`.`template_view`;
@@ -433,3 +449,14 @@ CREATE VIEW `cloud`.`volume_view` AS
         `cloud`.`account` resource_tag_account ON resource_tag_account.id = resource_tags.account_id
             left join
         `cloud`.`domain` resource_tag_domain ON resource_tag_domain.id = resource_tags.domain_id;
+
+-- Extra Dhcp Options
+CREATE TABLE `cloud`.`nic_extra_dhcp_options` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT 'id',
+  `uuid` varchar(255) UNIQUE,
+  `nic_id` bigint unsigned NOT NULL COMMENT ' nic id where dhcp options are applied',
+  `code` int(32),
+  `value` text,
+  PRIMARY KEY (`id`),
+  CONSTRAINT `fk_nic_extra_dhcp_options_nic_id` FOREIGN KEY (`nic_id`) REFERENCES `nics`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
