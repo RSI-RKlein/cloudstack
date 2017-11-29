@@ -449,6 +449,7 @@ public class AgentManagerImpl extends ManagerBase implements AgentManager, Handl
 
         final Command[] cmds = checkForCommandsAndTag(commands);
 
+        //check what agent is returned.
         final AgentAttache agent = getAttache(hostId);
         if (agent == null || agent.isClosed()) {
             throw new AgentUnavailableException("agent not logged into this management server", hostId);
@@ -1234,9 +1235,9 @@ public class AgentManagerImpl extends ManagerBase implements AgentManager, Handl
                 } else if (cmd instanceof PingCommand) {
                     logD = false;
                     s_logger.debug("Ping from " + hostId + "(" + hostName + ")");
-                    s_logger.trace("SeqA " + attache.getId() + "-" + request.getSequence() + ": Processing " + request);
+                    s_logger.trace("SeqA " + hostId + "-" + request.getSequence() + ": Processing " + request);
                 } else {
-                    s_logger.debug("SeqA " + attache.getId() + "-" + request.getSequence() + ": Processing " + request);
+                    s_logger.debug("SeqA " + hostId + "-" + request.getSequence() + ": Processing " + request);
                 }
             }
 

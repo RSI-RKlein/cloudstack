@@ -679,6 +679,12 @@ public class ResourceManagerImpl extends ManagerBase implements ResourceManager,
             }
         }
 
+        if ((hypervisorType.equalsIgnoreCase(HypervisorType.BareMetal.toString()))) {
+            if (hostTags.isEmpty()) {
+                throw new InvalidParameterValueException("hosttag is mandatory while adding host of type Baremetal");
+            }
+        }
+
         if (clusterName != null) {
             final HostPodVO pod = _podDao.findById(podId);
             if (pod == null) {
@@ -2172,7 +2178,7 @@ public class ResourceManagerImpl extends ManagerBase implements ResourceManager,
                 final List<VMInstanceVO> vmsOnLocalStorage = _storageMgr.listByStoragePool(storagePool.getId());
                 for (final VMInstanceVO vm : vmsOnLocalStorage) {
                     try {
-                        _vmMgr.destroy(vm.getUuid());
+                        _vmMgr.destroy(vm.getUuid(), false);
                     } catch (final Exception e) {
                         final String errorMsg = "There was an error Destory the vm: " + vm + " as a part of hostDelete id=" + host.getId();
                         s_logger.debug(errorMsg, e);

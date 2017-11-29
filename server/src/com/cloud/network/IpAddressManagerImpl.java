@@ -282,6 +282,8 @@ public class IpAddressManagerImpl extends ManagerBase implements IpAddressManage
     SearchBuilder<IPAddressVO> AssignIpAddressSearch;
     SearchBuilder<IPAddressVO> AssignIpAddressFromPodVlanSearch;
 
+    static Boolean rulesContinueOnErrFlag = true;
+
     @Override
     public boolean configure(String name, Map<String, Object> params) {
         // populate providers
@@ -405,7 +407,11 @@ public class IpAddressManagerImpl extends ManagerBase implements IpAddressManage
 
         Network.State.getStateMachine().registerListener(new NetworkStateListener(_configDao));
 
-        s_logger.info("Network Manager is configured.");
+        if (RulesContinueOnError.value() != null) {
+            rulesContinueOnErrFlag = RulesContinueOnError.value();
+        }
+
+        s_logger.info("IPAddress Manager is configured.");
 
         return true;
     }
@@ -571,7 +577,7 @@ public class IpAddressManagerImpl extends ManagerBase implements IpAddressManage
         // the code would be triggered
         s_logger.debug("Cleaning up remote access vpns as a part of public IP id=" + ipId + " release...");
         try {
-            _vpnMgr.destroyRemoteAccessVpnForIp(ipId, caller);
+            _vpnMgr.destroyRemoteAccessVpnForIp(ipId, caller,false);
         } catch (ResourceUnavailableException e) {
             s_logger.warn("Unable to destroy remote access vpn for ip id=" + ipId + " as a part of ip release", e);
             success = false;
@@ -603,7 +609,7 @@ public class IpAddressManagerImpl extends ManagerBase implements IpAddressManage
         if (ip.getAssociatedWithNetworkId() != null) {
             Network network = _networksDao.findById(ip.getAssociatedWithNetworkId());
             try {
-                if (!applyIpAssociations(network, true)) {
+                if (!applyIpAssociations(network, rulesContinueOnErrFlag)) {
                     s_logger.warn("Unable to apply ip address associations for " + network);
                     success = false;
                 }
@@ -1710,6 +1716,22 @@ public class IpAddressManagerImpl extends ManagerBase implements IpAddressManage
 
     Random _rand = new Random(System.currentTimeMillis());
 
+    /**
+     * Get the list of public IPs that need to be applied for a static NAT enable/disable operation.
+     * Manipulating only these ips prevents concurrency issues when disabling static nat at the same time.
+     * @param staticNats
+     * @return The list of IPs that need to be applied for the static NAT to work.
+     */
+    public List<IPAddressVO> getStaticNatSourceIps(List<? extends StaticNat> staticNats) {
+        List<IPAddressVO> userIps = new ArrayList<>();
+
+        for (StaticNat snat : staticNats) {
+            userIps.add(_ipAddressDao.findById(snat.getSourceIpAddressId()));
+        }
+
+        return userIps;
+    }
+
     @Override
     public boolean applyStaticNats(List<? extends StaticNat> staticNats, boolean continueOnError, boolean forRevoke) throws ResourceUnavailableException {
         if (staticNats == null || staticNats.size() == 0) {
@@ -1726,8 +1748,8 @@ public class IpAddressManagerImpl extends ManagerBase implements IpAddressManage
             return true;
         }
 
-        // get the list of public ip's owned by the network
-        List<IPAddressVO> userIps = _ipAddressDao.listByAssociatedNetwork(network.getId(), null);
+        List<IPAddressVO> userIps = getStaticNatSourceIps(staticNats);
+
         List<PublicIp> publicIps = new ArrayList<PublicIp>();
         if (userIps != null && !userIps.isEmpty()) {
             for (IPAddressVO userIp : userIps) {
@@ -2031,6 +2053,6 @@ public class IpAddressManagerImpl extends ManagerBase implements IpAddressManage
 
     @Override
     public ConfigKey<?>[] getConfigKeys() {
-        return new ConfigKey<?>[] {UseSystemPublicIps};
+        return new ConfigKey<?>[] {UseSystemPublicIps, RulesContinueOnError};
     }
 }

@@ -34,8 +34,6 @@ import java.util.UUID;
 import javax.inject.Inject;
 import javax.naming.ConfigurationException;
 
-import org.apache.log4j.Logger;
-
 import org.apache.cloudstack.acl.SecurityChecker;
 import org.apache.cloudstack.affinity.AffinityGroup;
 import org.apache.cloudstack.affinity.AffinityGroupService;
@@ -67,6 +65,7 @@ import org.apache.cloudstack.config.Configuration;
 import org.apache.cloudstack.context.CallContext;
 import org.apache.cloudstack.engine.orchestration.service.NetworkOrchestrationService;
 import org.apache.cloudstack.engine.subsystem.api.storage.DataStoreManager;
+import org.apache.cloudstack.engine.subsystem.api.storage.ZoneScope;
 import org.apache.cloudstack.framework.config.ConfigDepot;
 import org.apache.cloudstack.framework.config.ConfigKey;
 import org.apache.cloudstack.framework.config.Configurable;
@@ -81,10 +80,15 @@ import org.apache.cloudstack.region.PortableIpVO;
 import org.apache.cloudstack.region.Region;
 import org.apache.cloudstack.region.RegionVO;
 import org.apache.cloudstack.region.dao.RegionDao;
+import org.apache.cloudstack.storage.datastore.db.ImageStoreDao;
+import org.apache.cloudstack.storage.datastore.db.ImageStoreDetailsDao;
+import org.apache.cloudstack.storage.datastore.db.ImageStoreVO;
 import org.apache.cloudstack.storage.datastore.db.PrimaryDataStoreDao;
 import org.apache.cloudstack.storage.datastore.db.StoragePoolDetailsDao;
 import org.apache.cloudstack.storage.datastore.db.StoragePoolVO;
 import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.collections.MapUtils;
+import org.apache.log4j.Logger;
 
 import com.cloud.alert.AlertManager;
 import com.cloud.api.ApiDBUtils;
@@ -156,7 +160,6 @@ import com.cloud.network.dao.PhysicalNetworkDao;
 import com.cloud.network.dao.PhysicalNetworkTrafficTypeDao;
 import com.cloud.network.dao.PhysicalNetworkTrafficTypeVO;
 import com.cloud.network.dao.PhysicalNetworkVO;
-import com.cloud.network.element.NetworkElement;
 import com.cloud.network.rules.LoadBalancerContainer.Scheme;
 import com.cloud.network.vpc.VpcManager;
 import com.cloud.offering.DiskOffering;
@@ -180,7 +183,6 @@ import com.cloud.service.dao.ServiceOfferingDao;
 import com.cloud.service.dao.ServiceOfferingDetailsDao;
 import com.cloud.storage.DiskOfferingVO;
 import com.cloud.storage.Storage.ProvisioningType;
-import com.cloud.storage.Storage.StoragePoolType;
 import com.cloud.storage.StorageManager;
 import com.cloud.storage.dao.DiskOfferingDao;
 import com.cloud.storage.dao.VolumeDao;
@@ -217,6 +219,8 @@ import com.cloud.vm.dao.NicIpAliasDao;
 import com.cloud.vm.dao.NicIpAliasVO;
 import com.cloud.vm.dao.NicSecondaryIpDao;
 import com.cloud.vm.dao.VMInstanceDao;
+import com.google.common.base.MoreObjects;
+import com.google.common.base.Preconditions;
 
 public class ConfigurationManagerImpl extends ManagerBase implements ConfigurationManager, ConfigurationService, Configurable {
     public static final Logger s_logger = Logger.getLogger(ConfigurationManagerImpl.class);
@@ -336,6 +340,11 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
     AffinityGroupService _affinityGroupService;
     @Inject
     StorageManager _storageManager;
+    @Inject
+    ImageStoreDao _imageStoreDao;
+    @Inject
+    ImageStoreDetailsDao _imageStoreDetailsDao;
+
 
     // FIXME - why don't we have interface for DataCenterLinkLocalIpAddressDao?
     @Inject
@@ -371,7 +380,6 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
         configValuesForValidation.add("account.cleanup.interval");
         configValuesForValidation.add("alert.wait");
         configValuesForValidation.add("consoleproxy.capacityscan.interval");
-        configValuesForValidation.add("consoleproxy.loadscan.interval");
         configValuesForValidation.add("expunge.interval");
         configValuesForValidation.add("host.stats.interval");
         configValuesForValidation.add("investigate.retry.interval");
@@ -501,7 +509,7 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
                     throw new InvalidParameterValueException("unable to find storage pool by id " + resourceId);
                 }
                 if(name.equals(CapacityManager.StorageOverprovisioningFactor.key())) {
-                    if(pool.getPoolType() != StoragePoolType.NetworkFilesystem && pool.getPoolType() != StoragePoolType.VMFS) {
+                    if(!pool.getPoolType().supportsOverProvisioning() ) {
                         throw new InvalidParameterValueException("Unable to update  storage pool with id " + resourceId + ". Overprovision not supported for " + pool.getPoolType());
                     }
                 }
@@ -524,6 +532,13 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
                     _accountDetailsDao.update(accountDetailVO.getId(), accountDetailVO);
                 }
                 break;
+
+            case ImageStore:
+                final ImageStoreVO imgStore = _imageStoreDao.findById(resourceId);
+                Preconditions.checkState(imgStore != null);
+                _imageStoreDetailsDao.addDetail(resourceId, name, value, true);
+                break;
+
             default:
                 throw new InvalidParameterValueException("Scope provided is invalid");
             }
@@ -630,6 +645,7 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
         final Long clusterId = cmd.getClusterId();
         final Long storagepoolId = cmd.getStoragepoolId();
         final Long accountId = cmd.getAccountId();
+        final Long imageStoreId = cmd.getImageStoreId();
         CallContext.current().setEventDetails(" Name: " + name + " New Value: " + (name.toLowerCase().contains("password") ? "*****" : value == null ? "" : value));
         // check if config value exists
         final ConfigurationVO config = _configDao.findByName(name);
@@ -680,6 +696,11 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
             id = storagepoolId;
             paramCountCheck++;
         }
+        if (imageStoreId != null) {
+            scope = ConfigKey.Scope.ImageStore.toString();
+            id = imageStoreId;
+            paramCountCheck++;
+        }
 
         if (paramCountCheck > 1) {
             throw new InvalidParameterValueException("cannot handle multiple IDs, provide only one ID corresponding to the scope");
@@ -721,7 +742,8 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
         } else {
             type = c.getType();
         }
-
+        //no need to validate further if a
+        //config can have null value.
         String errMsg = null;
         try {
             if (type.equals(Integer.class)) {
@@ -730,6 +752,9 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
             } else if (type.equals(Float.class)) {
                 errMsg = "There was error in trying to parse value: " + value + ". Please enter a valid float value for parameter " + name;
                 Float.parseFloat(value);
+            } else if (type.equals(Long.class)) {
+                errMsg = "There was error in trying to parse value: " + value + ". Please enter a valid long value for parameter " + name;
+                Long.parseLong(value);
             }
         } catch (final Exception e) {
             // catching generic exception as some throws NullPointerException and some throws NumberFormatExcpeion
@@ -768,6 +793,20 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
                 return "Please enter either 'true' or 'false'.";
             }
             return null;
+        }
+
+        if (type.equals(Integer.class) && NetworkModel.MACIdentifier.key().equalsIgnoreCase(name)) {
+            try {
+                final int val = Integer.parseInt(value);
+                //The value need to be between 0 to 255 because the mac generation needs a value of 8 bit
+                //0 value is considered as disable.
+                if(val < 0 || val > 255){
+                    throw new InvalidParameterValueException(name+" value should be between 0 and 255. 0 value will disable this feature");
+                }
+            } catch (final NumberFormatException e) {
+                s_logger.error("There was an error trying to parse the integer value for:" + name);
+                throw new InvalidParameterValueException("There was an error trying to parse the integer value for:" + name);
+            }
         }
 
         if (type.equals(Integer.class) && configValuesForValidation.contains(name)) {
@@ -1314,7 +1353,6 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
         final String errorMsg = "The zone cannot be deleted because ";
 
 
-
         // Check if there are any non-removed hosts in the zone.
         if (!_hostDao.listByDataCenterId(zoneId).isEmpty()) {
             throw new CloudRuntimeException(errorMsg + "there are servers in this zone.");
@@ -1348,6 +1386,11 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
         // Check if there are any non-removed physical networks in the zone.
         if (!_physicalNetworkDao.listByZone(zoneId).isEmpty()) {
             throw new CloudRuntimeException(errorMsg + "there are physical networks in this zone.");
+        }
+
+        //check if there are any secondary stores attached to the zone
+        if(!_imageStoreDao.findByScope(new ZoneScope(zoneId)).isEmpty()) {
+            throw new CloudRuntimeException(errorMsg + "there are Secondary storages in this zone");
         }
 
         // Check if there are any non-removed VMware datacenters in the zone.
@@ -1774,6 +1817,7 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
             @Override
             public DataCenterVO doInTransaction(final TransactionStatus status) {
                 final DataCenterVO zone = _zoneDao.persist(zoneFinal);
+                CallContext.current().putContextParameter(DataCenter.class, zone.getUuid());
                 if (domainId != null) {
                     // zone is explicitly dedicated to this domain
                     // create affinity group associated and dedicate the zone.
@@ -1972,6 +2016,9 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
         final String vmTypeString = cmd.getSystemVmType();
         VirtualMachine.Type vmType = null;
         boolean allowNetworkRate = false;
+
+        Boolean isCustomizedIops;
+
         if (cmd.getIsSystem()) {
             if (vmTypeString == null || VirtualMachine.Type.DomainRouter.toString().toLowerCase().equals(vmTypeString)) {
                 vmType = VirtualMachine.Type.DomainRouter;
@@ -1986,8 +2033,19 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
                 throw new InvalidParameterValueException("Invalid systemVmType. Supported types are: " + VirtualMachine.Type.DomainRouter + ", " + VirtualMachine.Type.ConsoleProxy
                         + ", " + VirtualMachine.Type.SecondaryStorageVm);
             }
+
+            if (cmd.isCustomizedIops() != null) {
+                throw new InvalidParameterValueException("Customized IOPS is not a valid parameter for a system VM.");
+            }
+
+            isCustomizedIops = false;
+
+            if (cmd.getHypervisorSnapshotReserve() != null) {
+                throw new InvalidParameterValueException("Hypervisor snapshot reserve is not a valid parameter for a system VM.");
+            }
         } else {
             allowNetworkRate = true;
+            isCustomizedIops = cmd.isCustomizedIops();
         }
 
         if (cmd.getNetworkRate() != null) {
@@ -2012,7 +2070,7 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
 
         return createServiceOffering(userId, cmd.getIsSystem(), vmType, cmd.getServiceOfferingName(), cpuNumber, memory, cpuSpeed, cmd.getDisplayText(),
                 cmd.getProvisioningType(), localStorageRequired, offerHA, limitCpuUse, volatileVm, cmd.getTags(), cmd.getDomainId(), cmd.getHostTag(),
-                cmd.getNetworkRate(), cmd.getDeploymentPlanner(), cmd.getDetails(), cmd.isCustomizedIops(), cmd.getMinIops(), cmd.getMaxIops(),
+                cmd.getNetworkRate(), cmd.getDeploymentPlanner(), cmd.getDetails(), isCustomizedIops, cmd.getMinIops(), cmd.getMaxIops(),
                 cmd.getBytesReadRate(), cmd.getBytesWriteRate(), cmd.getIopsReadRate(), cmd.getIopsWriteRate(), cmd.getHypervisorSnapshotReserve());
     }
 
@@ -2818,16 +2876,16 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
                 String newVlanNetmask = newVlanNetmaskFinal;
                 String newVlanGateway = newVlanGatewayFinal;
 
-                if ((sameSubnet == null || sameSubnet.first() == false) && network.getTrafficType() == TrafficType.Guest && network.getGuestType() == GuestType.Shared
+                if ((sameSubnet == null || !sameSubnet.first()) && network.getTrafficType() == TrafficType.Guest && network.getGuestType() == GuestType.Shared
                         && _vlanDao.listVlansByNetworkId(networkId) != null) {
                     final Map<Capability, String> dhcpCapabilities = _networkSvc.getNetworkOfferingServiceCapabilities(_networkOfferingDao.findById(network.getNetworkOfferingId()),
                             Service.Dhcp);
                     final String supportsMultipleSubnets = dhcpCapabilities.get(Capability.DhcpAccrossMultipleSubnets);
                     if (supportsMultipleSubnets == null || !Boolean.valueOf(supportsMultipleSubnets)) {
-                        throw new  InvalidParameterValueException("The Dhcp serivice provider for this network dose not support the dhcp  across multiple subnets");
+                        throw new  InvalidParameterValueException("The dhcp service provider for this network does not support dhcp across multiple subnets");
                     }
                     s_logger.info("adding a new subnet to the network " + network.getId());
-                } else if (sameSubnet != null)  {
+                } else if (sameSubnet != null) {
                     // if it is same subnet the user might not send the vlan and the
                     // netmask details. so we are
                     // figuring out while validation and setting them here.
@@ -2843,13 +2901,13 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
         });
     }
 
-    public NetUtils.SupersetOrSubset checkIfSubsetOrSuperset(String newVlanGateway, String newVlanNetmask, final VlanVO vlan, final String startIP, final String endIP) {
+    public NetUtils.SupersetOrSubset checkIfSubsetOrSuperset(String vlanGateway, String vlanNetmask, String newVlanGateway, String newVlanNetmask, final String newStartIP, final String newEndIP) {
         if (newVlanGateway == null && newVlanNetmask == null) {
-            newVlanGateway = vlan.getVlanGateway();
-            newVlanNetmask = vlan.getVlanNetmask();
+            newVlanGateway = vlanGateway;
+            newVlanNetmask = vlanNetmask;
             // this means he is trying to add to the existing subnet.
-            if (NetUtils.sameSubnet(startIP, newVlanGateway, newVlanNetmask)) {
-                if (NetUtils.sameSubnet(endIP, newVlanGateway, newVlanNetmask)) {
+            if (NetUtils.sameSubnet(newStartIP, newVlanGateway, newVlanNetmask)) {
+                if (NetUtils.sameSubnet(newEndIP, newVlanGateway, newVlanNetmask)) {
                     return NetUtils.SupersetOrSubset.sameSubnet;
                 }
             }
@@ -2858,15 +2916,15 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
             throw new InvalidParameterValueException(
                     "either both netmask and gateway should be passed or both should me omited.");
         } else {
-            if (!NetUtils.sameSubnet(startIP, newVlanGateway, newVlanNetmask)) {
+            if (!NetUtils.sameSubnet(newStartIP, newVlanGateway, newVlanNetmask)) {
                 throw new InvalidParameterValueException("The start ip and gateway do not belong to the same subnet");
             }
-            if (!NetUtils.sameSubnet(endIP, newVlanGateway, newVlanNetmask)) {
+            if (!NetUtils.sameSubnet(newEndIP, newVlanGateway, newVlanNetmask)) {
                 throw new InvalidParameterValueException("The end ip and gateway do not belong to the same subnet");
             }
         }
         final String cidrnew = NetUtils.getCidrFromGatewayAndNetmask(newVlanGateway, newVlanNetmask);
-        final String existing_cidr = NetUtils.getCidrFromGatewayAndNetmask(vlan.getVlanGateway(), vlan.getVlanNetmask());
+        final String existing_cidr = NetUtils.getCidrFromGatewayAndNetmask(vlanGateway, vlanNetmask);
 
         return NetUtils.isNetowrkASubsetOrSupersetOfNetworkB(cidrnew, existing_cidr);
     }
@@ -2876,51 +2934,21 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
         String vlanGateway = null;
         String vlanNetmask = null;
         boolean sameSubnet = false;
-        if (vlans != null && vlans.size() > 0) {
+        if (CollectionUtils.isNotEmpty(vlans)) {
             for (final VlanVO vlan : vlans) {
-                if (ipv4) {
-                    vlanGateway = vlan.getVlanGateway();
-                    vlanNetmask = vlan.getVlanNetmask();
-                    // check if subset or super set or neither.
-                    final NetUtils.SupersetOrSubset val = checkIfSubsetOrSuperset(newVlanGateway, newVlanNetmask, vlan, startIP, endIP);
-                    if (val == NetUtils.SupersetOrSubset.isSuperset) {
-                        // this means that new cidr is a superset of the
-                        // existing subnet.
-                        throw new InvalidParameterValueException("The subnet you are trying to add is a superset of the existing subnet having gateway" + vlan.getVlanGateway()
-                                + " and netmask  " + vlan.getVlanNetmask());
-                    } else if (val == NetUtils.SupersetOrSubset.neitherSubetNorSuperset) {
-                        // this implies the user is trying to add a new subnet
-                        // which is not a superset or subset of this subnet.
-                        // checking with the other subnets.
-                        continue;
-                    } else if (val == NetUtils.SupersetOrSubset.isSubset) {
-                        // this means he is trying to add to the same subnet.
-                        throw new InvalidParameterValueException("The subnet you are trying to add is a subset of the existing subnet having gateway" + vlan.getVlanGateway()
-                                + " and netmask  " + vlan.getVlanNetmask());
-                    } else if (val == NetUtils.SupersetOrSubset.sameSubnet) {
-                        sameSubnet = true;
-                        //check if the gateway provided by the user is same as that of the subnet.
-                        if (newVlanGateway != null && !newVlanGateway.equals(vlanGateway)) {
-                            throw new InvalidParameterValueException("The gateway of the subnet should be unique. The subnet alreaddy has a gateway " + vlanGateway);
-                        }
-                        break;
-                    }
-                }
-                if (ipv6) {
-                    if (ip6Gateway != null && !ip6Gateway.equals(network.getIp6Gateway())) {
-                        throw new InvalidParameterValueException("The input gateway " + ip6Gateway + " is not same as network gateway " + network.getIp6Gateway());
-                    }
-                    if (ip6Cidr != null && !ip6Cidr.equals(network.getIp6Cidr())) {
-                        throw new InvalidParameterValueException("The input cidr " + ip6Cidr + " is not same as network ciddr " + network.getIp6Cidr());
-                    }
-                    ip6Gateway = network.getIp6Gateway();
-                    ip6Cidr = network.getIp6Cidr();
-                    _networkModel.checkIp6Parameters(startIPv6, endIPv6, ip6Gateway, ip6Cidr);
-                    sameSubnet = true;
-                }
+                vlanGateway = vlan.getVlanGateway();
+                vlanNetmask = vlan.getVlanNetmask();
+                sameSubnet = hasSameSubnet(ipv4, vlanGateway, vlanNetmask, newVlanGateway, newVlanNetmask, startIP, endIP,
+                        ipv6, ip6Gateway, ip6Cidr, startIPv6, endIPv6, network);
+                if (sameSubnet) break;
             }
+        } else if(network.getGateway() != null && network.getCidr() != null) {
+            vlanGateway = network.getGateway();
+            vlanNetmask = NetUtils.getCidrNetmask(network.getCidr());
+            sameSubnet = hasSameSubnet(ipv4, vlanGateway, vlanNetmask, newVlanGateway, newVlanNetmask, startIP, endIP,
+                    ipv6, ip6Gateway, ip6Cidr, startIPv6, endIPv6, network);
         }
-        if (newVlanGateway == null && newVlanNetmask == null && sameSubnet == false) {
+        if (newVlanGateway == null && newVlanNetmask == null && !sameSubnet) {
             throw new InvalidParameterValueException("The ip range dose not belong to any of the existing subnets, Provide the netmask and gateway if you want to add new subnet");
         }
         Pair<String, String> vlanDetails = null;
@@ -2935,8 +2963,48 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
             throw new InvalidParameterValueException("The gateway ip should not be the part of the ip range being added.");
         }
 
-        final Pair<Boolean, Pair<String, String>> result = new Pair<Boolean, Pair<String, String>>(sameSubnet, vlanDetails);
-        return result;
+        return new Pair<Boolean, Pair<String, String>>(sameSubnet, vlanDetails);
+    }
+
+    public boolean hasSameSubnet(boolean ipv4, String vlanGateway, String vlanNetmask, String newVlanGateway, String newVlanNetmask, String newStartIp, String newEndIp,
+                                  boolean ipv6, String newIp6Gateway, String newIp6Cidr, String newIp6StartIp, String newIp6EndIp, Network network) {
+        if (ipv4) {
+            // check if subset or super set or neither.
+            final NetUtils.SupersetOrSubset val = checkIfSubsetOrSuperset(vlanGateway, vlanNetmask, newVlanGateway, newVlanNetmask, newStartIp, newEndIp);
+            if (val == NetUtils.SupersetOrSubset.isSuperset) {
+                // this means that new cidr is a superset of the
+                // existing subnet.
+                throw new InvalidParameterValueException("The subnet you are trying to add is a superset of the existing subnet having gateway " + vlanGateway
+                        + " and netmask " + vlanNetmask);
+            } else if (val == NetUtils.SupersetOrSubset.neitherSubetNorSuperset) {
+                // this implies the user is trying to add a new subnet
+                // which is not a superset or subset of this subnet.
+            } else if (val == NetUtils.SupersetOrSubset.isSubset) {
+                // this means he is trying to add to the same subnet.
+                throw new InvalidParameterValueException("The subnet you are trying to add is a subset of the existing subnet having gateway " + vlanGateway
+                        + " and netmask " + vlanNetmask);
+            } else if (val == NetUtils.SupersetOrSubset.sameSubnet) {
+                //check if the gateway provided by the user is same as that of the subnet.
+                if (newVlanGateway != null && !newVlanGateway.equals(vlanGateway)) {
+                    throw new InvalidParameterValueException("The gateway of the subnet should be unique. The subnet already has a gateway " + vlanGateway);
+                }
+                return true;
+            }
+        }
+        if (ipv6) {
+            if (newIp6Gateway != null && !newIp6Gateway.equals(network.getIp6Gateway())) {
+                throw new InvalidParameterValueException("The input gateway " + newIp6Gateway + " is not same as network gateway " + network.getIp6Gateway());
+            }
+            if (newIp6Cidr != null && !newIp6Cidr.equals(network.getIp6Cidr())) {
+                throw new InvalidParameterValueException("The input cidr " + newIp6Cidr + " is not same as network cidr " + network.getIp6Cidr());
+            }
+
+            newIp6Gateway = MoreObjects.firstNonNull(newIp6Gateway, network.getIp6Gateway());
+            newIp6Cidr = MoreObjects.firstNonNull(newIp6Cidr, network.getIp6Cidr());
+            _networkModel.checkIp6Parameters(newIp6StartIp, newIp6EndIp, newIp6Gateway, newIp6Cidr);
+            return true;
+        }
+        return false;
     }
 
     @Override
@@ -2988,20 +3056,32 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
             }
         }
 
+
         // 1) if vlan is specified for the guest network range, it should be the
         // same as network's vlan
         // 2) if vlan is missing, default it to the guest network's vlan
         if (network.getTrafficType() == TrafficType.Guest) {
             String networkVlanId = null;
-            final URI uri = network.getBroadcastUri();
-            if (uri != null) {
-                final String[] vlan = uri.toString().split("vlan:\\/\\/");
-                networkVlanId = vlan[1];
-                // For pvlan
-                networkVlanId = networkVlanId.split("-")[0];
+            boolean connectivityWithoutVlan = false;
+            if (_networkModel.areServicesSupportedInNetwork(network.getId(), Service.Connectivity)) {
+                Map<Capability, String> connectivityCapabilities = _networkModel.getNetworkServiceCapabilities(network.getId(), Service.Connectivity);
+                connectivityWithoutVlan = MapUtils.isNotEmpty(connectivityCapabilities) && connectivityCapabilities.containsKey(Capability.NoVlan);
             }
 
-            if (vlanId != null) {
+            final URI uri = network.getBroadcastUri();
+            if (connectivityWithoutVlan) {
+                networkVlanId = network.getBroadcastDomainType().toUri(network.getUuid()).toString();
+            } else if (uri != null) {
+                // Do not search for the VLAN tag when the network doesn't support VLAN
+               if (uri.toString().startsWith("vlan")) {
+                    final String[] vlan = uri.toString().split("vlan:\\/\\/");
+                    networkVlanId = vlan[1];
+                    // For pvlan
+                    networkVlanId = networkVlanId.split("-")[0];
+                }
+            }
+
+            if (vlanId != null && !connectivityWithoutVlan) {
                 // if vlan is specified, throw an error if it's not equal to
                 // network's vlanId
                 if (networkVlanId != null && !NetUtils.isSameIsolationId(networkVlanId, vlanId)) {
@@ -4035,7 +4115,7 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
             throw new InvalidParameterValueException("Capabilities for 'Connectivity' service can be specified " +
                     "only when Connectivity service is enabled for network offering.");
         }
-        validateConnectivityServiceCapablities(serviceProviderMap.get(Service.Connectivity), connectivityServiceCapabilityMap);
+        validateConnectivityServiceCapablities(guestType, serviceProviderMap.get(Service.Connectivity), connectivityServiceCapabilityMap);
 
         final Map<Service, Map<Capability, String>> serviceCapabilityMap = new HashMap<Service, Map<Capability, String>>();
         serviceCapabilityMap.put(Service.Lb, lbServiceCapabilityMap);
@@ -4177,15 +4257,18 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
         }
     }
 
-    void validateConnectivityServiceCapablities(final Set<Provider> providers, final Map<Capability, String> connectivityServiceCapabilityMap) {
+    void validateConnectivityServiceCapablities(final Network.GuestType guestType, final Set<Provider> providers, final Map<Capability, String> connectivityServiceCapabilityMap) {
         if (connectivityServiceCapabilityMap != null && !connectivityServiceCapabilityMap.isEmpty()) {
             for (final Map.Entry<Capability, String>entry: connectivityServiceCapabilityMap.entrySet()) {
                 final Capability capability = entry.getKey();
-                if (capability == Capability.StretchedL2Subnet) {
+                if (capability == Capability.StretchedL2Subnet || capability == Capability.PublicAccess) {
                     final String value = entry.getValue().toLowerCase();
                     if (!(value.contains("true") ^ value.contains("false"))) {
                         throw new InvalidParameterValueException("Invalid value (" + value + ") for " + capability +
                                 " should be true/false");
+                    } else if (capability == Capability.PublicAccess && guestType != GuestType.Shared) {
+                        throw new InvalidParameterValueException("Capability " + capability.getName() + " can only be enabled for network offerings " +
+                                "with guest type Shared.");
                     }
                 } else {
                     throw new InvalidParameterValueException("Capability " + capability.getName() + " can not be "
@@ -4195,16 +4278,8 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
 
             // validate connectivity service provider actually supports specified capabilities
             if (providers != null && !providers.isEmpty()) {
-                for (final Provider provider: providers) {
-                    final NetworkElement element = _networkModel.getElementImplementingProvider(provider.getName());
-                    final Map<Service, Map<Capability, String>> capabilities = element.getCapabilities();
-                    if (capabilities != null && !capabilities.isEmpty()) {
-                        final Map<Capability, String> connectivityCapabilities =  capabilities.get(Service.Connectivity);
-                        if (connectivityCapabilities == null || connectivityCapabilities != null && !connectivityCapabilities.keySet().contains(Capability.StretchedL2Subnet)) {
-                            throw new InvalidParameterValueException("Provider: " + provider.getName() + " does not support "
-                                    + Capability.StretchedL2Subnet.getName());
-                        }
-                    }
+                for (Capability capability : connectivityServiceCapabilityMap.keySet()) {
+                    _networkModel.providerSupportsCapability(providers, Service.Connectivity, capability);
                 }
             }
         }
@@ -4222,7 +4297,10 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
 
         // specifyVlan should always be true for Shared network offerings
         if (!specifyVlan && type == GuestType.Shared) {
-            throw new InvalidParameterValueException("SpecifyVlan should be true if network offering's type is " + type);
+            Set<Provider> connectivityProviders = serviceProviderMap != null ? serviceProviderMap.get(Service.Connectivity) : null;
+            if (CollectionUtils.isEmpty(connectivityProviders) || !_networkModel.providerSupportsCapability(connectivityProviders, Service.Connectivity, Capability.NoVlan)) {
+                throw new InvalidParameterValueException("SpecifyVlan should be true if network offering's type is " + type);
+            }
         }
 
         // specifyIpRanges should always be true for Shared networks
@@ -4270,6 +4348,7 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
         boolean publicLb = false;
         boolean internalLb = false;
         boolean strechedL2Subnet = false;
+        boolean publicAccess = false;
 
         if (serviceCapabilityMap != null && !serviceCapabilityMap.isEmpty()) {
             final Map<Capability, String> lbServiceCapabilityMap = serviceCapabilityMap.get(Service.Lb);
@@ -4341,9 +4420,18 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
 
             final Map<Capability, String> connectivityServiceCapabilityMap = serviceCapabilityMap.get(Service.Connectivity);
             if (connectivityServiceCapabilityMap != null && !connectivityServiceCapabilityMap.isEmpty()) {
-                final String value = connectivityServiceCapabilityMap.get(Capability.StretchedL2Subnet);
-                if ("true".equalsIgnoreCase(value)) {
-                    strechedL2Subnet = true;
+                if (connectivityServiceCapabilityMap.containsKey(Capability.StretchedL2Subnet)) {
+                    final String value = connectivityServiceCapabilityMap.get(Capability.StretchedL2Subnet);
+                    if ("true".equalsIgnoreCase(value)) {
+                        strechedL2Subnet = true;
+                    }
+                }
+
+                if (connectivityServiceCapabilityMap.containsKey(Capability.PublicAccess)) {
+                    final String value = connectivityServiceCapabilityMap.get(Capability.PublicAccess);
+                    if ("true".equalsIgnoreCase(value)) {
+                        publicAccess = true;
+                    }
                 }
             }
         }
@@ -4355,7 +4443,7 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
 
         final NetworkOfferingVO offeringFinal = new NetworkOfferingVO(name, displayText, trafficType, systemOnly, specifyVlan, networkRate, multicastRate, isDefault, availability,
                 tags, type, conserveMode, dedicatedLb, sharedSourceNat, redundantRouter, elasticIp, elasticLb, specifyIpRanges, inline, isPersistent, associatePublicIp, publicLb,
-                internalLb, egressDefaultPolicy, strechedL2Subnet);
+                internalLb, egressDefaultPolicy, strechedL2Subnet, publicAccess);
 
         if (serviceOfferingId != null) {
             offeringFinal.setServiceOfferingId(serviceOfferingId);
@@ -4490,7 +4578,7 @@ public class ConfigurationManagerImpl extends ManagerBase implements Configurati
         }
 
         if (name != null) {
-            sc.addAnd("name", SearchCriteria.Op.LIKE, "%" + name + "%");
+            sc.addAnd("name", SearchCriteria.Op.EQ, name);
         }
 
         if (guestIpType != null) {

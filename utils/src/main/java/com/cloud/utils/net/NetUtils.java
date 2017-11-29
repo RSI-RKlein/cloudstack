@@ -83,9 +83,19 @@ public class NetUtils {
     public final static int DEFAULT_AUTOSCALE_POLICY_INTERVAL_TIME = 30;
     public final static int DEFAULT_AUTOSCALE_POLICY_QUIET_TIME = 5 * 60;
     private final static Random s_rand = new Random(System.currentTimeMillis());
+    private final static long prefix = 0x1e;
 
-    public static long createSequenceBasedMacAddress(final long macAddress) {
-        return macAddress | 0x060000000000l | (long)s_rand.nextInt(32768) << 25 & 0x00fffe000000l;
+    public static long createSequenceBasedMacAddress(final long macAddress, long globalConfig) {
+        /*
+            Logic for generating MAC address:
+            Mac = B1:B2:B3:B4:B5:B6 (Bx is a byte).
+            B1 -> Presently controlled by prefix variable. The value should be such that the MAC is local and unicast.
+            B2 -> This will be configurable for each deployment/installation. Controlled by the global config MACIdentifier
+            B3 -> A randomly generated number between 0 - 255
+            B4,5,6 -> These bytes are based on the unique DB identifier associated with the IP address for which MAC is generated (refer to mac_address field in user_ip_address table).
+         */
+
+        return macAddress | prefix<<40 | globalConfig << 32 & 0x00ff00000000l | (long)s_rand.nextInt(255) << 24;
     }
 
     public static String getHostName() {
@@ -557,6 +567,12 @@ public class NetUtils {
         if (cidr == null || cidr.isEmpty()) {
             return false;
         }
+
+        try {
+            IPv6Network.fromString(cidr);
+            return true;
+        } catch (IllegalArgumentException e) {}
+
         final String[] cidrPair = cidr.split("\\/");
         if (cidrPair.length != 2) {
             return false;
@@ -1184,7 +1200,10 @@ public class NetUtils {
         return false;
     }
 
-    public static boolean isValidS2SVpnPolicy(final String policys) {
+    public static boolean isValidS2SVpnPolicy(final String policyType, final String policys) {
+        if (policyType == null || policyType.isEmpty()) {
+            return false;
+        }
         if (policys == null || policys.isEmpty()) {
             return false;
         }
@@ -1205,14 +1224,17 @@ public class NetUtils {
             if (!cipher.matches("3des|aes128|aes192|aes256")) {
                 return false;
             }
-            if (!hash.matches("md5|sha1")) {
+            if (!hash.matches("md5|sha1|sha256|sha384|sha512")) {
                 return false;
             }
-            String pfsGroup = null;
+            String group = null;
             if (!policy.equals(cipherHash)) {
-                pfsGroup = policy.split(";")[1];
+                group = policy.split(";")[1];
             }
-            if (pfsGroup != null && !pfsGroup.matches("modp1024|modp1536")) {
+            if (group == null && policyType.toLowerCase().matches("ike")) {
+                return false; // StrongSwan requires a DH group for the IKE policy
+            }
+            if (group != null && !group.matches("modp1024|modp1536|modp2048|modp3072|modp4096|modp6144|modp8192")) {
                 return false;
             }
         }
@@ -1581,5 +1603,24 @@ public class NetUtils {
         return !isInRange;
     }
 
+    public static IPv6Address EUI64Address(final IPv6Network cidr, final String macAddress) {
+        if (cidr.getNetmask().asPrefixLength() > 64) {
+            throw new IllegalArgumentException("IPv6 subnet " + cidr.toString() + " is not 64 bits or larger in size");
+        }
+
+        String mac[] = macAddress.toLowerCase().split(":");
+
+        return IPv6Address.fromString(cidr.getFirst().toString() +
+                Integer.toHexString(Integer.parseInt(mac[0], 16) ^ 2) +
+                mac[1] + ":" + mac[2] + "ff:fe" + mac[3] +":" + mac[4] + mac[5]);
+    }
+
+    public static IPv6Address EUI64Address(final String cidr, final String macAddress) {
+        return EUI64Address(IPv6Network.fromString(cidr), macAddress);
+    }
+
+    public static IPv6Address ipv6LinkLocal(final String macAddress) {
+        return EUI64Address(IPv6Network.fromString("fe80::/64"), macAddress);
+    }
 
 }

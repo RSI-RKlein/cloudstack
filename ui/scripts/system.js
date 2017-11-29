@@ -19740,21 +19740,6 @@
                                             zonename: {
                                                 label: 'label.zone'
                                             },
-                                            details: {
-                                                label: 'label.details',
-                                                converter: function (array1) {
-                                                    var string1 = '';
-                                                    if (array1 != null) {
-                                                        for (var i = 0; i < array1.length; i++) {
-                                                            if (i > 0)
-                                                            string1 += ', ';
-
-                                                            string1 += array1[i].name + ': ' + array1[i].value;
-                                                        }
-                                                    }
-                                                    return string1;
-                                                }
-                                            },
                                             id: {
                                                 label: 'label.id'
                                             }
@@ -19775,28 +19760,58 @@
                                                 }
                                             });
                                         }
-                                    }
-
-                                    // Granular settings for storage pool for secondary storage is not required
-                                    /*  settings: {
-                                    title: 'label.menu.global.settings',
-                                    custom: cloudStack.uiCustom.granularSettings({
-                                    dataProvider: function(args) {
-                                    args.response.success({
-                                    data: [
-                                    { name: 'config.param.1', value: 1 },
-                                    { name: 'config.param.2', value: 2 }
-                                    ]
-                                    });
                                     },
-                                    actions: {
-                                    edit: function(args) {
-                                    // call updateStorageLevelParameters
-                                    args.response.success();
-                                    }
-                                    }
-                                    })
-                                    } */
+
+                                    // Granular settings for image store
+									settings: {
+										title: 'label.settings',
+										custom: cloudStack.uiCustom.granularSettings({
+											dataProvider: function (args) {
+
+												$.ajax({
+													url: createURL('listConfigurations&imagestoreuuid=' + args.context.secondaryStorage[0].id),
+													data: listViewDataProvider(args, {
+													},
+													{
+														searchBy: 'name'
+													}),
+													success: function (json) {
+														args.response.success({
+															data: json.listconfigurationsresponse.configuration
+														});
+													},
+
+													error: function (json) {
+														args.response.error(parseXMLHttpResponse(json));
+													}
+												});
+											},
+											actions: {
+												edit: function (args) {
+													// call updateStorageLevelParameters
+													var data = {
+														name: args.data.jsonObj.name,
+														value: args.data.value
+													};
+
+													$.ajax({
+														url: createURL('updateConfiguration&imagestoreuuid=' + args.context.secondaryStorage[0].id),
+														data: data,
+														success: function (json) {
+															var item = json.updateconfigurationresponse.configuration;
+															args.response.success({
+																data: item
+															});
+														},
+
+														error: function (json) {
+															args.response.error(parseXMLHttpResponse(json));
+														}
+													});
+												}
+											}
+										})
+									}
                                 }
                             }
                         }

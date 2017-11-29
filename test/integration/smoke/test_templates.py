@@ -795,7 +795,7 @@ class TestTemplates(cloudstackTestCase):
                         "ListTemplates should not list any system templates"
                         )
         return
-
+		
 class TestCopyDeleteTemplate(cloudstackTestCase):
 
     def setUp(self):
@@ -902,7 +902,7 @@ class TestCopyDeleteTemplate(cloudstackTestCase):
             cleanup_resources(cls.apiclient, cls._cleanup)
 
         except Exception as e:
-           raise Exception("Warning: Exception during cleanup : %s" % e)
+           raise Exception("Warning: Exception during cleanup : %s" % e) 
 
         return
 
@@ -918,10 +918,10 @@ class TestCopyDeleteTemplate(cloudstackTestCase):
             self.skipTest(
                 "Skipping test due to there are less than two zones.")
         return
-
+			
 	self.sourceZone = zones[0]
 	self.destZone = zones[1]
-
+            
         template = Template.create(
                                 self.apiclient,
                                 self.services["template"],

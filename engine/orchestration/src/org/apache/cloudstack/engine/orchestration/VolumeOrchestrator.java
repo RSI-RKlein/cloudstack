@@ -72,6 +72,7 @@ import com.cloud.agent.api.to.DataTO;
 import com.cloud.agent.api.to.DiskTO;
 import com.cloud.agent.api.to.VirtualMachineTO;
 import com.cloud.agent.manager.allocator.PodAllocator;
+import com.cloud.capacity.CapacityManager;
 import com.cloud.cluster.ClusterManager;
 import com.cloud.configuration.Resource.ResourceType;
 import com.cloud.dc.DataCenter;
@@ -123,6 +124,7 @@ import com.cloud.utils.exception.CloudRuntimeException;
 import com.cloud.utils.fsm.NoTransitionException;
 import com.cloud.utils.fsm.StateMachine2;
 import com.cloud.vm.DiskProfile;
+import com.cloud.vm.UserVmCloneSettingVO;
 import com.cloud.vm.UserVmVO;
 import com.cloud.vm.VirtualMachine;
 import com.cloud.vm.VirtualMachine.State;
@@ -132,9 +134,15 @@ import com.cloud.vm.VmWorkAttachVolume;
 import com.cloud.vm.VmWorkMigrateVolume;
 import com.cloud.vm.VmWorkSerializer;
 import com.cloud.vm.VmWorkTakeVolumeSnapshot;
+import com.cloud.vm.dao.UserVmCloneSettingDao;
 import com.cloud.vm.dao.UserVmDao;
 
 public class VolumeOrchestrator extends ManagerBase implements VolumeOrchestrationService, Configurable {
+
+    public enum UserVmCloneType {
+        full, linked
+    }
+
     private static final Logger s_logger = Logger.getLogger(VolumeOrchestrator.class);
 
     @Inject
@@ -181,6 +189,8 @@ public class VolumeOrchestrator extends ManagerBase implements VolumeOrchestrati
     ClusterManager clusterManager;
     @Inject
     StorageManager storageMgr;
+    @Inject
+    protected UserVmCloneSettingDao _vmCloneSettingDao;
     @Inject
     StorageStrategyFactory _storageStrategyFactory;
 
@@ -1376,6 +1386,33 @@ public class VolumeOrchestrator extends ManagerBase implements VolumeOrchestrati
             disk.setDetails(getDetails(volumeInfo, dataStore));
 
             vm.addDisk(disk);
+
+            // If hypervisor is vSphere, check for clone type setting.
+            if (vm.getHypervisorType().equals(HypervisorType.VMware)) {
+                // retrieve clone flag.
+                UserVmCloneType cloneType = UserVmCloneType.linked;
+                Boolean value = CapacityManager.VmwareCreateCloneFull.valueIn(vol.getPoolId());
+                if (value != null && value) {
+                    cloneType = UserVmCloneType.full;
+                }
+                try {
+                    UserVmCloneSettingVO cloneSettingVO = _vmCloneSettingDao.findByVmId(vm.getId());
+                    if (cloneSettingVO != null){
+                        if (! cloneSettingVO.getCloneType().equals(cloneType.toString())){
+                            cloneSettingVO.setCloneType(cloneType.toString());
+                            _vmCloneSettingDao.update(cloneSettingVO.getVmId(), cloneSettingVO);
+                        }
+                    }
+                    else {
+                        UserVmCloneSettingVO vmCloneSettingVO = new UserVmCloneSettingVO(vm.getId(), cloneType.toString());
+                        _vmCloneSettingDao.persist(vmCloneSettingVO);
+                    }
+                }
+                catch (Throwable e){
+                    s_logger.debug("[NSX_PLUGIN_LOG] ERROR: " + e.getMessage());
+                }
+            }
+
         }
     }
 
@@ -1422,7 +1459,7 @@ public class VolumeOrchestrator extends ManagerBase implements VolumeOrchestrati
         return true;
     }
 
-    private void cleanupVolumeDuringAttachFailure(Long volumeId) {
+    private void cleanupVolumeDuringAttachFailure(Long volumeId, Long vmId) {
         VolumeVO volume = _volsDao.findById(volumeId);
         if (volume == null) {
             return;
@@ -1431,6 +1468,13 @@ public class VolumeOrchestrator extends ManagerBase implements VolumeOrchestrati
         if (volume.getState().equals(Volume.State.Creating)) {
             s_logger.debug("Remove volume: " + volume.getId() + ", as it's leftover from last mgt server stop");
             _volsDao.remove(volume.getId());
+        }
+
+        if(volume.getState().equals(Volume.State.Attaching)) {
+            s_logger.warn("Vol: " + volume.getName() + " failed to attach to VM: " + _userVmDao.findById(vmId).getHostName() +
+                    " on last mgt server stop, changing state back to Ready");
+            volume.setState(Volume.State.Ready);
+            _volsDao.update(volumeId, volume);
         }
     }
 
@@ -1475,7 +1519,7 @@ public class VolumeOrchestrator extends ManagerBase implements VolumeOrchestrati
             try {
                 if (job.getCmd().equalsIgnoreCase(VmWorkAttachVolume.class.getName())) {
                     VmWorkAttachVolume work = VmWorkSerializer.deserialize(VmWorkAttachVolume.class, job.getCmdInfo());
-                    cleanupVolumeDuringAttachFailure(work.getVolumeId());
+                    cleanupVolumeDuringAttachFailure(work.getVolumeId(), work.getVmId());
                 } else if (job.getCmd().equalsIgnoreCase(VmWorkMigrateVolume.class.getName())) {
                     VmWorkMigrateVolume work = VmWorkSerializer.deserialize(VmWorkMigrateVolume.class, job.getCmdInfo());
                     cleanupVolumeDuringMigrationFailure(work.getVolumeId(), work.getDestPoolId());
