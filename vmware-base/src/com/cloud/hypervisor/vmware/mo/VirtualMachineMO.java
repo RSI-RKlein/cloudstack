@@ -661,7 +661,14 @@ public class VirtualMachineMO extends BaseMO {
     public boolean hasSnapshot() throws Exception {
         VirtualMachineSnapshotInfo info = getSnapshotInfo();
         if (info != null) {
-            return info.getCurrentSnapshot() != null;
+            ManagedObjectReference currentSnapshot = info.getCurrentSnapshot();
+            if (currentSnapshot != null) {
+                return true;
+            }
+            List<VirtualMachineSnapshotTree> rootSnapshotList = info.getRootSnapshotList();
+            if (rootSnapshotList != null && rootSnapshotList.size() > 0) {
+                return true;
+            }
         }
         return false;
     }
@@ -2137,7 +2144,7 @@ public class VirtualMachineMO extends BaseMO {
         }
 
         assert (false);
-        throw new Exception(diskController + " Controller Not Found");
+        throw new IllegalStateException("Scsi disk controller of type " + diskController + " not found among configured devices.");
     }
 
     public int getScsiDiskControllerKeyNoException(String diskController) throws Exception {

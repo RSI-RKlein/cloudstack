@@ -227,13 +227,18 @@ public class CitrixHelper {
             prodVersion = record.softwareVersion.get("platform_version").trim();
         } else {
             prodVersion = prodVersion.trim();
-            final String[] items = prodVersion.split("\\.");
-            if (Integer.parseInt(items[0]) > 6) {
-                prodVersion = "6.5.0";
-            } else if (Integer.parseInt(items[0]) == 6 && Integer.parseInt(items[1]) >= 4) {
-                prodVersion = "6.5.0";
-            }
         }
         return prodVersion;
+    }
+
+    public static String getPVbootloaderArgs(String guestOS) {
+        if (guestOS.startsWith("SUSE Linux Enterprise Server")) {
+            if (guestOS.contains("64-bit")) {
+                return "--kernel /boot/vmlinuz-xen --ramdisk /boot/initrd-xen";
+            } else if (guestOS.contains("32-bit")) {
+                return "--kernel /boot/vmlinuz-xenpae --ramdisk /boot/initrd-xenpae";
+            }
+        }
+        return "";
     }
 }

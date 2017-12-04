@@ -26,6 +26,8 @@ import javax.inject.Inject;
 import javax.naming.ConfigurationException;
 
 import com.cloud.configuration.Resource;
+import com.cloud.event.EventTypes;
+import com.cloud.event.UsageEventUtils;
 import com.cloud.user.ResourceLimitService;
 import org.apache.log4j.Logger;
 import org.springframework.stereotype.Component;
@@ -115,7 +117,7 @@ public class ImageStoreUploadMonitorImpl extends ManagerBase implements ImageSto
     public boolean configure(String name, Map<String, Object> params) throws ConfigurationException {
         _executor = Executors.newScheduledThreadPool(1, new NamedThreadFactory("Upload-Monitor"));
         _monitoringInterval = UploadMonitoringInterval.value();
-        _uploadOperationTimeout = UploadOperationTimeout.value() * 60 * 1000;
+        _uploadOperationTimeout = UploadOperationTimeout.value() * 60 * 1000L;
         _nodeId = ManagementServerNode.getManagementServerId();
         return true;
     }
@@ -153,6 +155,14 @@ public class ImageStoreUploadMonitorImpl extends ManagerBase implements ImageSto
     }
 
     @Override
+    public void processHostAboutToBeRemoved(long hostId) {
+    }
+
+    @Override
+    public void processHostRemoved(long hostId, long clusterId) {
+    }
+
+    @Override
     public boolean isRecurring() {
         return false;
     }
@@ -165,6 +175,10 @@ public class ImageStoreUploadMonitorImpl extends ManagerBase implements ImageSto
     @Override
     public boolean processTimeout(long agentId, long seq) {
         return false;
+    }
+
+    @Override
+    public void processHostAdded(long hostId) {
     }
 
     @Override
@@ -297,6 +311,12 @@ public class ImageStoreUploadMonitorImpl extends ManagerBase implements ImageSto
                             stateMachine.transitTo(tmpVolume, Event.OperationSucceeded, null, _volumeDao);
                             _resourceLimitMgr.incrementResourceCount(volume.getAccountId(), Resource.ResourceType.secondary_storage, answer.getVirtualSize());
 
+                            // publish usage events
+                            UsageEventUtils.publishUsageEvent(EventTypes.EVENT_VOLUME_UPLOAD, tmpVolume.getAccountId(),
+                                    tmpVolumeDataStore.getDataStoreId(), tmpVolume.getId(), tmpVolume.getName(),
+                                    null, null, tmpVolumeDataStore.getPhysicalSize(), tmpVolumeDataStore.getSize(),
+                                    Volume.class.getName(), tmpVolume.getUuid());
+
                             if (s_logger.isDebugEnabled()) {
                                 s_logger.debug("Volume " + tmpVolume.getUuid() + " uploaded successfully");
                             }
@@ -377,6 +397,13 @@ public class ImageStoreUploadMonitorImpl extends ManagerBase implements ImageSto
                             _templateDao.update(tmpTemplate.getId(), templateUpdate);
                             stateMachine.transitTo(tmpTemplate, VirtualMachineTemplate.Event.OperationSucceeded, null, _templateDao);
                             _resourceLimitMgr.incrementResourceCount(template.getAccountId(), Resource.ResourceType.secondary_storage, answer.getVirtualSize());
+                            //publish usage event
+                            String etype = EventTypes.EVENT_TEMPLATE_CREATE;
+                            if (tmpTemplate.getFormat() == Storage.ImageFormat.ISO) {
+                                etype = EventTypes.EVENT_ISO_CREATE;
+                            }
+                            UsageEventUtils.publishUsageEvent(etype, tmpTemplate.getAccountId(), tmpTemplateDataStore.getDataStoreId(), tmpTemplate.getId(), tmpTemplate.getName(), null, null,
+                                    tmpTemplateDataStore.getPhysicalSize(), tmpTemplateDataStore.getSize(), VirtualMachineTemplate.class.getName(), tmpTemplate.getUuid());
 
                             if (s_logger.isDebugEnabled()) {
                                 s_logger.debug("Template " + tmpTemplate.getUuid() + " uploaded successfully");

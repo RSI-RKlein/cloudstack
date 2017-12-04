@@ -26,6 +26,7 @@ under the License.
 <script type="text/javascript">
  $.extend(dictionary, {
 'label.add.ldap.account': '<fmt:message key="label.add.ldap.account" />',
+'label.rule': '<fmt:message key="label.rule" />',
 'label.rules': '<fmt:message key="label.rules" />',
 'label.running.vms': '<fmt:message key="label.running.vms" />',
 'label.s3.access_key': '<fmt:message key="label.s3.access_key" />',
@@ -1124,6 +1125,7 @@ under the License.
 'message.desc.create.ssh.key.pair': '<fmt:message key="message.desc.create.ssh.key.pair" />',
 'message.removed.ssh.key.pair': '<fmt:message key="message.removed.ssh.key.pair" />',
 'message.please.select.ssh.key.pair.use.with.this.vm': '<fmt:message key="message.please.select.ssh.key.pair.use.with.this.vm" />',
-'message.ldap.group.import': '<fmt:message key="message.ldap.group.import" />'
+'message.ldap.group.import': '<fmt:message key="message.ldap.group.import" />',
+'label.vpn.force.encapsulation': '<fmt:message key="label.vpn.force.encapsulation" />'
 });
 </script>

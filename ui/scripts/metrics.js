@@ -23,7 +23,7 @@
                 name: {
                     label: 'metrics'
                 }
-            },
+            }
         }
     };
 
@@ -153,7 +153,7 @@
 
                                 $.ajax({
                                     url: createURL('listClusters'),
-                                    data: {zoneid: zone.id},
+                                    data: {zoneid: zone.id, pagesize: -1},
                                     success: function(json) {
                                         if (json && json.listclustersresponse && json.listclustersresponse.cluster && json.listclustersresponse.count) {
                                             items[idx].clusters += parseInt(json.listclustersresponse.count);
@@ -163,7 +163,7 @@
                                                 }
                                                 $.ajax({
                                                     url: createURL('listHosts'),
-                                                    data: {clusterid: cluster.id, type: 'routing'},
+                                                    data: {clusterid: cluster.id, type: 'routing', pagesize: -1},
                                                     success: function(json) {
                                                         if (json && json.listhostsresponse && json.listhostsresponse.host && json.listhostsresponse.count) {
                                                             items[idx].hosts += parseInt(json.listhostsresponse.count);
@@ -358,9 +358,19 @@
             dataProvider: function(args) {
                 var data = {};
                 listViewDataProvider(args, data);
+
+                if ("zones" in args.context && args.context.zones[0]) {
+                    data['zoneid'] = args.context.zones[0].id;
+                }
+
+                if ("pods" in args.context && args.context.pods[0]) {
+                    data['podid'] = args.context.pods[0].id;
+                }
+
                 if (args.context.metricsFilterData && args.context.metricsFilterData.key && args.context.metricsFilterData.value) {
                     data[args.context.metricsFilterData.key] = args.context.metricsFilterData.value;
                 }
+
                 $.ajax({
                     url: createURL('listClusters'),
                     data: data,
@@ -415,7 +425,7 @@
 
                                 $.ajax({
                                     url: createURL('listHosts'),
-                                    data: {clusterid: cluster.id, type: 'routing'},
+                                    data: {clusterid: cluster.id, type: 'routing', pagesize: -1},
                                     success: function(json) {
                                         if (json && json.listhostsresponse && json.listhostsresponse.host && json.listhostsresponse.count) {
                                             items[idx].hosts += parseInt(json.listhostsresponse.count);
@@ -546,7 +556,20 @@
                         'Error': 'off',
                         'Connecting': 'transition',
                         'Rebalancing': 'transition',
-                        'Alert': 'warning',
+                        'Alert': 'warning'
+                    },
+                    compact: true
+                },
+                outofbandmanagementpowerstate: {
+                    label: 'label.metrics.outofbandmanagementpowerstate',
+                    converter: function (str) {
+                        // For localization
+                        return str;
+                    },
+                    indicator: {
+                        'On': 'on',
+                        'Off': 'off',
+                        'Unknown': 'warning'
                     },
                     compact: true
                 },
@@ -558,7 +581,7 @@
                     collapsible: true,
                     columns: {
                         cores: {
-                            label: 'label.metrics.num.cpu.cores',
+                            label: 'label.metrics.num.cpu.cores'
                         },
                         cputotal: {
                             label: 'label.metrics.cpu.total'
@@ -575,8 +598,8 @@
                             label: 'label.metrics.allocated',
                             thresholdcolor: true,
                             thresholds: {
-                                notification: 'cpunotificationthreshold',
-                                disable: 'cpudisablethreshold'
+                                notification: 'cpuallocatednotificationthreshold',
+                                disable: 'cpuallocateddisablethreshold'
                             }
                         }
                     }
@@ -600,8 +623,8 @@
                             label: 'label.metrics.allocated',
                             thresholdcolor: true,
                             thresholds: {
-                                notification: 'memnotificationthreshold',
-                                disable: 'memdisablethreshold'
+                                notification: 'memallocatednotificationthreshold',
+                                disable: 'memallocateddisablethreshold'
                             }
                         }
                     }
@@ -623,9 +646,29 @@
                 var data = {};
                 data.type = 'routing';
                 listViewDataProvider(args, data);
+
+                if (!args.context.instances) {
+                    if ("zones" in args.context && args.context.zones[0]) {
+                        data['zoneid'] = args.context.zones[0].id;
+                    }
+
+                    if ("pods" in args.context && args.context.pods[0]) {
+                        data['podid'] = args.context.pods[0].id;
+                    }
+
+                    if ("clusters" in args.context && args.context.clusters[0]) {
+                        data['clusterid'] = args.context.clusters[0].id;
+                    }
+                } else {
+                    if (args.context.instances[0]) {
+                        data['id'] = args.context.instances[0].hostid;
+                    }
+                }
+
                 if (args.context.metricsFilterData && args.context.metricsFilterData.key && args.context.metricsFilterData.value) {
                     data[args.context.metricsFilterData.key] = args.context.metricsFilterData.value;
                 }
+
                 $.ajax({
                     url: createURL('listHosts'),
                     data: data,
@@ -633,6 +676,9 @@
                         var items = json.listhostsresponse.host;
                         if (items) {
                             $.each(items, function(idx, host) {
+                                if (host && host.outofbandmanagement) {
+                                    items[idx].outofbandmanagementpowerstate = host.outofbandmanagement.powerstate;
+                                }
                                 items[idx].cores = host.cpunumber;
                                 items[idx].cputotal = (parseFloat(host.cpunumber) * parseFloat(host.cpuspeed) / 1000.0).toFixed(2);
                                 if (host.cpuused) {
@@ -656,11 +702,31 @@
                                     items[idx].networkwrite = '';
                                 }
 
+                                var cpuOverCommit = 1.0;
+                                var memOverCommit = 1.0;
+                                $.ajax({
+                                    url: createURL('listClusters'),
+                                    data: {clusterid: host.clusterid, listAll: true},
+                                    success: function(json) {
+                                        if (json.listclustersresponse && json.listclustersresponse.cluster) {
+                                            var cluster = json.listclustersresponse.cluster[0];
+                                            cpuOverCommit = parseFloat(cluster.cpuovercommitratio);
+                                            memOverCommit = parseFloat(cluster.memoryovercommitratio);
+                                        }
+                                    },
+                                    async: false
+                                });
+
                                 // Threshold color coding
                                 items[idx].cpunotificationthreshold = 0.75 * parseFloat(items[idx].cputotal);
                                 items[idx].cpudisablethreshold = 0.95 * parseFloat(items[idx].cputotal);
+                                items[idx].cpuallocatednotificationthreshold = 0.75 * cpuOverCommit * parseFloat(items[idx].cputotal);
+                                items[idx].cpuallocateddisablethreshold = 0.95 * cpuOverCommit * parseFloat(items[idx].cputotal);
+
                                 items[idx].memnotificationthreshold = 0.75 * parseFloat(items[idx].memtotal);
                                 items[idx].memdisablethreshold = 0.95 * parseFloat(items[idx].memtotal);
+                                items[idx].memallocatednotificationthreshold = 0.75 * memOverCommit * parseFloat(items[idx].memtotal);
+                                items[idx].memallocateddisablethreshold = 0.95 * memOverCommit * parseFloat(items[idx].memtotal);
 
                                 $.ajax({
                                     url: createURL('listConfigurations'),
@@ -671,15 +737,19 @@
                                                 switch (config.name) {
                                                     case 'cluster.cpu.allocated.capacity.disablethreshold':
                                                         items[idx].cpudisablethreshold = parseFloat(config.value) * parseFloat(items[idx].cputotal);
+                                                        items[idx].cpuallocateddisablethreshold = parseFloat(config.value) * cpuOverCommit * parseFloat(items[idx].cputotal);
                                                         break;
                                                     case 'cluster.cpu.allocated.capacity.notificationthreshold':
                                                         items[idx].cpunotificationthreshold = parseFloat(config.value) * parseFloat(items[idx].cputotal);
+                                                        items[idx].cpuallocatednotificationthreshold = parseFloat(config.value) * cpuOverCommit * parseFloat(items[idx].cputotal);
                                                         break;
                                                     case 'cluster.memory.allocated.capacity.disablethreshold':
                                                         items[idx].memdisablethreshold = parseFloat(config.value) * parseFloat(items[idx].memtotal);
+                                                        items[idx].memallocateddisablethreshold = parseFloat(config.value) * memOverCommit * parseFloat(items[idx].memtotal);
                                                         break;
                                                     case 'cluster.memory.allocated.capacity.notificationthreshold':
                                                         items[idx].memnotificationthreshold = parseFloat(config.value) * parseFloat(items[idx].memtotal);
+                                                        items[idx].memallocatednotificationthreshold = parseFloat(config.value) * memOverCommit * parseFloat(items[idx].memtotal);
                                                         break;
                                                 }
                                             });
@@ -688,20 +758,6 @@
                                     async: false
                                 });
 
-                                var cpuOverCommit = 1.0;
-                                var memOverCommit = 1.0;
-                                $.ajax({
-                                    url: createURL('listClusters'),
-                                    data: {clusterid: host.clusterid, listAll: true},
-                                    success: function(json) {
-                                        if (json.listclustersresponse && json.listclustersresponse.cluster) {
-                                            var cluster = json.listclustersresponse.cluster[0];
-                                            cpuOverCommit = cluster.cpuovercommitratio;
-                                            memOverCommit = cluster.memoryovercommitratio;
-                                        }
-                                    },
-                                    async: false
-                                });
 
                                 items[idx].cputotal = items[idx].cputotal + ' Ghz (x' + cpuOverCommit + ')';
                                 items[idx].memtotal = items[idx].memtotal + ' (x' + memOverCommit + ')';
@@ -768,7 +824,7 @@
                         'Stopping': 'transition',
                         'Starting': 'transition',
                         'Migrating': 'transition',
-                        'Shutdowned': 'warning',
+                        'Shutdowned': 'warning'
                     },
                     compact: true
                 },
@@ -783,13 +839,13 @@
                     collapsible: true,
                     columns: {
                         cores: {
-                            label: 'label.metrics.num.cpu.cores',
+                            label: 'label.metrics.num.cpu.cores'
                         },
                         cputotal: {
                             label: 'label.metrics.cpu.total'
                         },
                         cpuused: {
-                            label: 'label.metrics.cpu.used.avg',
+                            label: 'label.metrics.cpu.used.avg'
                         }
                     }
                 },
@@ -833,9 +889,15 @@
             dataProvider: function(args) {
                 var data = {};
                 listViewDataProvider(args, data);
+
+                if ("hosts" in args.context && args.context.hosts[0]) {
+                    data['hostid'] = args.context.hosts[0].id;
+                }
+
                 if (args.context.metricsFilterData && args.context.metricsFilterData.key && args.context.metricsFilterData.value) {
                     data[args.context.metricsFilterData.key] = args.context.metricsFilterData.value;
                 }
+
                 $.ajax({
                     url: createURL('listVirtualMachines'),
                     data: data,
@@ -912,7 +974,7 @@
                         'Expunging': 'off',
                         'Migrating': 'warning',
                         'UploadOp': 'transition',
-                        'Snapshotting': 'warning',
+                        'Snapshotting': 'warning'
                     },
                     compact: true
                 },
@@ -927,14 +989,24 @@
                 },
                 storagepool: {
                     label: 'label.metrics.storagepool'
-                },
+                }
             },
             dataProvider: function(args) {
                 var data = {listAll: true};
                 listViewDataProvider(args, data);
+
+                if ("instances" in args.context && args.context.instances[0]) {
+                    data['virtualmachineid'] = args.context.instances[0].id;
+                }
+
+                if ("primarystorages" in args.context && args.context.primarystorages[0]) {
+                    data['storageid'] = args.context.primarystorages[0].id;
+                }
+
                 if (args.context.metricsFilterData && args.context.metricsFilterData.key && args.context.metricsFilterData.value) {
                     data[args.context.metricsFilterData.key] = args.context.metricsFilterData.value;
                 }
+
                 $.ajax({
                     url: createURL('listVolumes'),
                     data: data,
@@ -990,7 +1062,7 @@
                                 'ErrorInMaintenance': 'off',
                                 'PrepareForMaintenance': 'transition',
                                 'CancelMaintenance': 'warning',
-                                'Maintenance': 'warning',
+                                'Maintenance': 'warning'
                             },
                             compact: true
                         },
@@ -999,7 +1071,7 @@
                         },
                         type: {
                             label: 'label.metrics.disk.storagetype'
-                        },
+                        }
                     }
                 },
                 disk: {
@@ -1034,9 +1106,23 @@
             dataProvider: function(args) {
                 var data = {};
                 listViewDataProvider(args, data);
+
+                if ("zones" in args.context && args.context.zones[0]) {
+                    data['zoneid'] = args.context.zones[0].id;
+                }
+
+                if ("pods" in args.context && args.context.pods[0]) {
+                    data['podid'] = args.context.pods[0].id;
+                }
+
+                if ("clusters" in args.context && args.context.clusters[0]) {
+                    data['clusterid'] = args.context.clusters[0].id;
+                }
+
                 if (args.context.metricsFilterData && args.context.metricsFilterData.key && args.context.metricsFilterData.value) {
                     data[args.context.metricsFilterData.key] = args.context.metricsFilterData.value;
                 }
+
                 $.ajax({
                     url: createURL('listStoragePools'),
                     data: data,
@@ -1081,13 +1167,13 @@
                                                 $.each(json.listconfigurationsresponse.configuration, function(i, config) {
                                                     switch (config.name) {
                                                         case 'cluster.storage.allocated.capacity.notificationthreshold':
-                                                            items[idx].storageallocatednotificationthreshold = parseFloat(config.value) * parseFloat(items[idx].disksizetotal);
+                                                            items[idx].storageallocatednotificationthreshold = parseFloat(config.value) * items[idx].overprovisionfactor * parseFloat(items[idx].disksizetotal);
                                                             break;
                                                         case 'cluster.storage.capacity.notificationthreshold':
                                                             items[idx].storagenotificationthreshold = parseFloat(config.value) * parseFloat(items[idx].disksizetotal);
                                                             break;
                                                         case 'pool.storage.allocated.capacity.disablethreshold':
-                                                            items[idx].storageallocateddisablethreshold = parseFloat(config.value) * parseFloat(items[idx].disksizetotal);
+                                                            items[idx].storageallocateddisablethreshold = parseFloat(config.value) * items[idx].overprovisionfactor * parseFloat(items[idx].disksizetotal);
                                                             break;
                                                         case 'pool.storage.capacity.disablethreshold':
                                                             items[idx].storagedisablethreshold = parseFloat(config.value) * parseFloat(items[idx].disksizetotal);

@@ -977,13 +977,14 @@ public class VirtualMachineManagerImpl extends ManagerBase implements VirtualMac
                     _uservmDetailsDao.addDetail(vm.getId(), "cpuOvercommitRatio", cluster_detail_cpu.getValue(), true);
                     _uservmDetailsDao.addDetail(vm.getId(), "memoryOvercommitRatio", cluster_detail_ram.getValue(), true);
                 }
+
                 vmProfile.setCpuOvercommitRatio(Float.parseFloat(cluster_detail_cpu.getValue()));
                 vmProfile.setMemoryOvercommitRatio(Float.parseFloat(cluster_detail_ram.getValue()));
                 StartAnswer startAnswer = null;
 
                 try {
                     if (!changeState(vm, Event.OperationRetry, destHostId, work, Step.Prepare)) {
-                        throw new ConcurrentOperationException("Unable to update the state of the Virtual Machine");
+                        throw new ConcurrentOperationException("Unable to update the state of the Virtual Machine "+vm.getUuid()+" oldstate: "+vm.getState()+ "Event :"+Event.OperationRetry);
                     }
                 } catch (final NoTransitionException e1) {
                     throw new ConcurrentOperationException(e1.getMessage());
@@ -993,7 +994,7 @@ public class VirtualMachineManagerImpl extends ManagerBase implements VirtualMac
                     if (s_logger.isDebugEnabled()) {
                         s_logger.debug("VM is being created in podId: " + vm.getPodIdToDeployIn());
                     }
-                    _networkMgr.prepare(vmProfile, dest, ctx);
+                    _networkMgr.prepare(vmProfile, new DeployDestination(dest.getDataCenter(), dest.getPod(), null, null), ctx);
                     if (vm.getHypervisorType() != HypervisorType.BareMetal) {
                         volumeMgr.prepare(vmProfile, dest);
                     }
@@ -1034,7 +1035,7 @@ public class VirtualMachineManagerImpl extends ManagerBase implements VirtualMac
                         if (host_guid != null) {
                             final HostVO finalHost = _resourceMgr.findHostByGuid(host_guid);
                             if (finalHost == null) {
-                                throw new CloudRuntimeException("Host Guid " + host_guid + " doesn't exist in DB, something wrong here");
+                                throw new CloudRuntimeException("Host Guid " + host_guid + " doesn't exist in DB, something went wrong while processing start answer: "+startAnswer);
                             }
                             destHostId = finalHost.getId();
                         }
@@ -1042,7 +1043,8 @@ public class VirtualMachineManagerImpl extends ManagerBase implements VirtualMac
                             syncDiskChainChange(startAnswer);
 
                             if (!changeState(vm, Event.OperationSucceeded, destHostId, work, Step.Done)) {
-                                throw new ConcurrentOperationException("Unable to transition to a new state.");
+                                s_logger.error("Unable to transition to a new state. VM uuid: "+vm.getUuid()+    "VM oldstate:"+vm.getState()+"Event:"+Event.OperationSucceeded);
+                                throw new ConcurrentOperationException("Failed to deploy VM"+ vm.getUuid());
                             }
 
                             // Update GPU device capacity
@@ -1078,9 +1080,9 @@ public class VirtualMachineManagerImpl extends ManagerBase implements VirtualMac
                             if (answer == null || !answer.getResult()) {
                                 s_logger.warn("Unable to stop " + vm + " due to " + (answer != null ? answer.getDetails() : "no answers"));
                                 _haMgr.scheduleStop(vm, destHostId, WorkType.ForceStop);
-                                throw new ExecutionException("Unable to stop " + vm + " so we are unable to retry the start operation");
+                                throw new ExecutionException("Unable to stop this VM, "+vm.getUuid()+" so we are unable to retry the start operation");
                             }
-                            throw new ExecutionException("Unable to start " + vm + " due to error in finalizeStart, not retrying");
+                            throw new ExecutionException("Unable to start  VM:"+vm.getUuid()+" due to error in finalizeStart, not retrying");
                         }
                     }
                     s_logger.info("Unable to start VM on " + dest.getHost() + " due to " + (startAnswer == null ? " no start answer" : startAnswer.getDetails()));
@@ -1088,8 +1090,8 @@ public class VirtualMachineManagerImpl extends ManagerBase implements VirtualMac
                         break;
                     }
 
-                } catch (final OperationTimedoutException e) {
-                    s_logger.debug("Unable to send the start command to host " + dest.getHost());
+                } catch (OperationTimedoutException e) {
+                    s_logger.debug("Unable to send the start command to host " + dest.getHost()+" failed to start VM: "+vm.getUuid());
                     if (e.isActive()) {
                         _haMgr.scheduleStop(vm, destHostId, WorkType.CheckStop);
                     }
@@ -1238,13 +1240,25 @@ public class VirtualMachineManagerImpl extends ManagerBase implements VirtualMac
         } catch (final ConcurrentOperationException e) {
             throw new CloudRuntimeException("Unable to stop vm because of a concurrent operation", e);
         }
+
     }
 
+    @Override
+    public void stopForced(String vmUuid) throws ResourceUnavailableException {
+        try {
+            advanceStop(vmUuid, true);
+        } catch (final OperationTimedoutException e) {
+            throw new AgentUnavailableException("Unable to stop vm because the operation to stop timed out", e.getAgentId(), e);
+        } catch (final ConcurrentOperationException e) {
+            throw new CloudRuntimeException("Unable to stop vm because of a concurrent operation", e);
+        }
+    }
 
-    protected boolean getExecuteInSequence(final HypervisorType hypervisorType) {
-        if (HypervisorType.KVM == hypervisorType || HypervisorType.LXC == hypervisorType || HypervisorType.XenServer == hypervisorType) {
+    @Override
+    public boolean getExecuteInSequence(final HypervisorType hypervisorType) {
+        if (HypervisorType.KVM == hypervisorType || HypervisorType.XenServer == hypervisorType || HypervisorType.Hyperv == hypervisorType || HypervisorType.LXC == hypervisorType) {
             return false;
-        } else if(HypervisorType.VMware == hypervisorType) {
+        } else if (HypervisorType.VMware == hypervisorType) {
             final Boolean fullClone = HypervisorGuru.VmwareFullClone.value();
             return fullClone;
         } else {
@@ -2584,7 +2598,7 @@ public class VirtualMachineManagerImpl extends ManagerBase implements VirtualMac
         try {
 
             final Commands cmds = new Commands(Command.OnError.Stop);
-            cmds.addCommand(new RebootCommand(vm.getInstanceName()));
+            cmds.addCommand(new RebootCommand(vm.getInstanceName(), getExecuteInSequence(vm.getHypervisorType())));
             _agentMgr.send(host.getId(), cmds);
 
             final Answer rebootAnswer = cmds.getAnswer(RebootAnswer.class);
@@ -2641,7 +2655,7 @@ public class VirtualMachineManagerImpl extends ManagerBase implements VirtualMac
 
             if(!found) {
                 VMInstanceVO vm = _vmDao.findVMByInstanceName(name);
-                if(vm.getType() == VirtualMachine.Type.User) {
+                if(vm != null && vm.getType() == VirtualMachine.Type.User) {
                     updateVmMetaData(vm.getId(), platform);
                 }
             }
@@ -2786,6 +2800,18 @@ public class VirtualMachineManagerImpl extends ManagerBase implements VirtualMac
     }
 
     @Override
+    public void processHostAboutToBeRemoved(long hostId) {
+    }
+
+    @Override
+    public void processHostRemoved(long hostId, long clusterId) {
+    }
+
+    @Override
+    public void processHostAdded(long hostId) {
+    }
+
+    @Override
     public void processConnect(final Host agent, final StartupCommand cmd, final boolean forRebalance) throws ConnectionException {
         if (!(cmd instanceof StartupRoutingCommand)) {
             return;
@@ -2908,12 +2934,12 @@ public class VirtualMachineManagerImpl extends ManagerBase implements VirtualMac
                     newServiceOffering.getCpu() + " cpu(s) at " + newServiceOffering.getSpeed() + " Mhz, and " + newServiceOffering.getRamSize() + " MB of memory");
         }
 
-        // Check that the service offering being upgraded to has storage tags subset of the current service offering storage tags, since volume is not migrated.
+        // Check that the service offering being upgraded to has all the tags of the current service offering.
         final List<String> currentTags = StringUtils.csvTagsToList(currentServiceOffering.getTags());
         final List<String> newTags = StringUtils.csvTagsToList(newServiceOffering.getTags());
-        if (!currentTags.containsAll(newTags)) {
-            throw new InvalidParameterValueException("Unable to upgrade virtual machine; the new service offering " + " should have tags as subset of " +
-                    "current service offering tags. Current service offering tags: " + currentTags + "; " + "new service " + "offering tags: " + newTags);
+        if (!newTags.containsAll(currentTags)) {
+            throw new InvalidParameterValueException("Unable to upgrade virtual machine; the current service offering " + " should have tags as subset of " +
+                    "the new service offering tags. Current service offering tags: " + currentTags + "; " + "new service " + "offering tags: " + newTags);
         }
     }
 
@@ -3685,7 +3711,7 @@ public class VirtualMachineManagerImpl extends ManagerBase implements VirtualMac
     //
 
     @MessageHandler(topic = Topics.VM_POWER_STATE)
-    private void HandlePowerStateReport(final String subject, final String senderAddress, final Object args) {
+    protected void HandlePowerStateReport(final String subject, final String senderAddress, final Object args) {
         assert args != null;
         final Long vmId = (Long)args;
 
@@ -4575,7 +4601,13 @@ public class VirtualMachineManagerImpl extends ManagerBase implements VirtualMac
         }
         assert vm != null;
 
-        orchestrateStart(vm.getUuid(), work.getParams(), work.getPlan(), _dpMgr.getDeploymentPlannerByName(work.getDeploymentPlanner()));
+        try{
+            orchestrateStart(vm.getUuid(), work.getParams(), work.getPlan(), _dpMgr.getDeploymentPlannerByName(work.getDeploymentPlanner()));
+        }
+        catch (CloudRuntimeException e){
+            s_logger.info("Caught CloudRuntimeException, returning job failed");
+            return new Pair<JobInfo.Status, String>(JobInfo.Status.FAILED, null);
+        }
         return new Pair<JobInfo.Status, String>(JobInfo.Status.SUCCEEDED, null);
     }
 
