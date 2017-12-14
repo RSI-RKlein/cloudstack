@@ -150,6 +150,7 @@ import com.cloud.agent.api.to.VolumeTO;
 import com.cloud.agent.resource.virtualnetwork.VirtualRoutingResource;
 import com.cloud.exception.InternalErrorException;
 import com.cloud.hypervisor.kvm.resource.KVMHABase.NfsStoragePool;
+import com.cloud.hypervisor.kvm.resource.LibvirtVMDef.ChannelDef;
 import com.cloud.hypervisor.kvm.resource.LibvirtVMDef.DiskDef;
 import com.cloud.hypervisor.kvm.resource.LibvirtVMDef.InterfaceDef;
 import com.cloud.hypervisor.kvm.resource.wrapper.LibvirtRequestWrapper;
@@ -335,6 +336,19 @@ public class LibvirtComputingResourceTest {
         assertXpath(domainDoc, "/domain/devices/console/target/@port", "0");
         assertXpath(domainDoc, "/domain/devices/input/@type", "tablet");
         assertXpath(domainDoc, "/domain/devices/input/@bus", "usb");
+
+        assertNodeExists(domainDoc, "/domain/devices/channel");
+        assertXpath(domainDoc, "/domain/devices/channel/@type", ChannelDef.ChannelType.UNIX.toString());
+
+        /*
+           The configure() method of LibvirtComputingResource has not been called, so the default path for the sockets
+           hasn't been initialized. That's why we check for 'null'
+
+           Calling configure is also not possible since that looks for certain files on the system which are not present
+           during testing
+         */
+        assertXpath(domainDoc, "/domain/devices/channel/source/@path", "null/" + to.getName() + ".org.qemu.guest_agent.0");
+        assertXpath(domainDoc, "/domain/devices/channel/target/@name", "org.qemu.guest_agent.0");
 
         assertXpath(domainDoc, "/domain/memory/text()", String.valueOf( to.getMaxRam() / 1024 ));
         assertXpath(domainDoc, "/domain/currentMemory/text()", String.valueOf( to.getMinRam() / 1024 ));
@@ -2898,6 +2912,7 @@ public class LibvirtComputingResourceTest {
     @Test
     public void testSecurityGroupRulesCmdFalse() {
         final String guestIp = "127.0.0.1";
+        final String guestIp6 = "2001:db8::cad:40ff:fefd:75c4";
         final String guestMac = "00:00:00:00";
         final String vmName = "Test";
         final Long vmId = 1l;
@@ -2909,7 +2924,7 @@ public class LibvirtComputingResourceTest {
         final List<String> cidrs = new Vector<String>();
         cidrs.add("0.0.0.0/0");
 
-        final SecurityGroupRulesCmd command = new SecurityGroupRulesCmd(guestIp, guestMac, vmName, vmId, signature, seqNum, ingressRuleSet, egressRuleSet, secIps);
+        final SecurityGroupRulesCmd command = new SecurityGroupRulesCmd(guestIp, guestIp6, guestMac, vmName, vmId, signature, seqNum, ingressRuleSet, egressRuleSet, secIps);
 
         final LibvirtUtilitiesHelper libvirtUtilitiesHelper = Mockito.mock(LibvirtUtilitiesHelper.class);
         final Connect conn = Mockito.mock(Connect.class);
@@ -2953,6 +2968,7 @@ public class LibvirtComputingResourceTest {
     @Test
     public void testSecurityGroupRulesCmdTrue() {
         final String guestIp = "127.0.0.1";
+        final String guestIp6 = "2001:db8::cad:40ff:fefd:75c4";
         final String guestMac = "00:00:00:00";
         final String vmName = "Test";
         final Long vmId = 1l;
@@ -2964,7 +2980,7 @@ public class LibvirtComputingResourceTest {
         final List<String> cidrs = new Vector<String>();
         cidrs.add("0.0.0.0/0");
 
-        final SecurityGroupRulesCmd command = new SecurityGroupRulesCmd(guestIp, guestMac, vmName, vmId, signature, seqNum, ingressRuleSet, egressRuleSet, secIps);
+        final SecurityGroupRulesCmd command = new SecurityGroupRulesCmd(guestIp, guestIp6, guestMac, vmName, vmId, signature, seqNum, ingressRuleSet, egressRuleSet, secIps);
 
         final LibvirtUtilitiesHelper libvirtUtilitiesHelper = Mockito.mock(LibvirtUtilitiesHelper.class);
         final Connect conn = Mockito.mock(Connect.class);
@@ -2997,7 +3013,7 @@ public class LibvirtComputingResourceTest {
         when(egressRuleSet[0].getEndPort()).thenReturn(22);
         when(egressRuleSet[0].getAllowedCidrs()).thenReturn(cidrs);
 
-        when(libvirtComputingResource.addNetworkRules(command.getVmName(), Long.toString(command.getVmId()), command.getGuestIp(), command.getSignature(),
+        when(libvirtComputingResource.addNetworkRules(command.getVmName(), Long.toString(command.getVmId()), command.getGuestIp(), command.getGuestIp6(), command.getSignature(),
                 Long.toString(command.getSeqNum()), command.getGuestMac(), command.stringifyRules(), vif, brname, command.getSecIpsString())).thenReturn(true);
 
         final LibvirtRequestWrapper wrapper = LibvirtRequestWrapper.getInstance();
@@ -3018,6 +3034,7 @@ public class LibvirtComputingResourceTest {
     @Test
     public void testSecurityGroupRulesCmdException() {
         final String guestIp = "127.0.0.1";
+        final String guestIp6 = "2001:db8::cad:40ff:fefd:75c4";
         final String guestMac = "00:00:00:00";
         final String vmName = "Test";
         final Long vmId = 1l;
@@ -3027,7 +3044,7 @@ public class LibvirtComputingResourceTest {
         final IpPortAndProto[] egressRuleSet = new IpPortAndProto[]{Mockito.mock(IpPortAndProto.class)};
         final List<String> secIps = new Vector<String>();
 
-        final SecurityGroupRulesCmd command = new SecurityGroupRulesCmd(guestIp, guestMac, vmName, vmId, signature, seqNum, ingressRuleSet, egressRuleSet, secIps);
+        final SecurityGroupRulesCmd command = new SecurityGroupRulesCmd(guestIp, guestIp6, guestMac, vmName, vmId, signature, seqNum, ingressRuleSet, egressRuleSet, secIps);
 
         final LibvirtUtilitiesHelper libvirtUtilitiesHelper = Mockito.mock(LibvirtUtilitiesHelper.class);
         final Connect conn = Mockito.mock(Connect.class);
@@ -4838,6 +4855,7 @@ public class LibvirtComputingResourceTest {
 
         final NicTO nic = Mockito.mock(NicTO.class);
         final NicTO[] nics = new NicTO[]{nic};
+        final int[] vms = new int[0];
 
         final String vmName = "Test";
         final String controlIp = "127.0.0.1";
@@ -4851,6 +4869,7 @@ public class LibvirtComputingResourceTest {
         when(libvirtComputingResource.getLibvirtUtilitiesHelper()).thenReturn(libvirtUtilitiesHelper);
         try {
             when(libvirtUtilitiesHelper.getConnectionByType(vmDef.getHvsType())).thenReturn(conn);
+            when(conn.listDomains()).thenReturn(vms);
             doNothing().when(libvirtComputingResource).createVbd(conn, vmSpec, vmName, vmDef);
         } catch (final LibvirtException e) {
             fail(e.getMessage());
@@ -4910,6 +4929,7 @@ public class LibvirtComputingResourceTest {
 
         final NicTO nic = Mockito.mock(NicTO.class);
         final NicTO[] nics = new NicTO[]{nic};
+        final int[] vms = new int[0];
 
         final String vmName = "Test";
         final String controlIp = "127.0.0.1";
@@ -4923,6 +4943,7 @@ public class LibvirtComputingResourceTest {
         when(libvirtComputingResource.getLibvirtUtilitiesHelper()).thenReturn(libvirtUtilitiesHelper);
         try {
             when(libvirtUtilitiesHelper.getConnectionByType(vmDef.getHvsType())).thenReturn(conn);
+            when(conn.listDomains()).thenReturn(vms);
             doNothing().when(libvirtComputingResource).createVbd(conn, vmSpec, vmName, vmDef);
         } catch (final LibvirtException e) {
             fail(e.getMessage());
@@ -4971,6 +4992,61 @@ public class LibvirtComputingResourceTest {
             fail(e.getMessage());
         }
     }
+
+    @Test
+    public void testStartCommandHostMemory() {
+        final VirtualMachineTO vmSpec = Mockito.mock(VirtualMachineTO.class);
+        final com.cloud.host.Host host = Mockito.mock(com.cloud.host.Host.class);
+        final boolean executeInSequence = false;
+
+        final StartCommand command = new StartCommand(vmSpec, host, executeInSequence);
+
+        final KVMStoragePoolManager storagePoolMgr = Mockito.mock(KVMStoragePoolManager.class);
+        final LibvirtUtilitiesHelper libvirtUtilitiesHelper = Mockito.mock(LibvirtUtilitiesHelper.class);
+        final Connect conn = Mockito.mock(Connect.class);
+        final LibvirtVMDef vmDef = Mockito.mock(LibvirtVMDef.class);
+
+        final NicTO nic = Mockito.mock(NicTO.class);
+        final NicTO[] nics = new NicTO[]{nic};
+        int vmId = 1;
+        final int[] vms = new int[]{vmId};
+        final Domain dm = Mockito.mock(Domain.class);
+
+        final String vmName = "Test";
+
+        when(libvirtComputingResource.getStoragePoolMgr()).thenReturn(storagePoolMgr);
+        when(vmSpec.getNics()).thenReturn(nics);
+        when(vmSpec.getType()).thenReturn(VirtualMachine.Type.User);
+        when(vmSpec.getName()).thenReturn(vmName);
+        when(vmSpec.getMaxRam()).thenReturn(512L);
+        when(libvirtComputingResource.createVMFromSpec(vmSpec)).thenReturn(vmDef);
+
+        when(libvirtComputingResource.getLibvirtUtilitiesHelper()).thenReturn(libvirtUtilitiesHelper);
+        try {
+            when(libvirtUtilitiesHelper.getConnectionByType(vmDef.getHvsType())).thenReturn(conn);
+            when(conn.listDomains()).thenReturn(vms);
+            when(conn.domainLookupByID(vmId)).thenReturn(dm);
+            when(dm.getMaxMemory()).thenReturn(1024L);
+            when(dm.getName()).thenReturn(vmName);
+            when(libvirtComputingResource.getTotalMemory()).thenReturn(2048*1024L);
+            doNothing().when(libvirtComputingResource).createVbd(conn, vmSpec, vmName, vmDef);
+        } catch (final LibvirtException e) {
+            fail(e.getMessage());
+        } catch (final InternalErrorException e) {
+            fail(e.getMessage());
+        } catch (final URISyntaxException e) {
+            fail(e.getMessage());
+        }
+
+        when(storagePoolMgr.connectPhysicalDisksViaVmSpec(vmSpec)).thenReturn(true);
+
+        final LibvirtRequestWrapper wrapper = LibvirtRequestWrapper.getInstance();
+        assertNotNull(wrapper);
+
+        final Answer answer = wrapper.execute(command, libvirtComputingResource);
+        assertTrue(answer.getResult());
+    }
+
 
     @Test
     public void testUpdateHostPasswordCommand() {

@@ -15,12 +15,10 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from pprint import pprint
+
 from netaddr import *
 
-
 def merge(dbag, ip):
-    added = False
     nic_dev_id = None
     for dev in dbag:
         if dev == "id":
@@ -44,8 +42,11 @@ def merge(dbag, ip):
     else:
         ip['nw_type'] = ip['nw_type'].lower()
     if ip['nw_type'] == 'control':
-        dbag['eth' + str(nic_dev_id)] = [ip]
+        dbag[ip['device']] = [ip]
     else:
-        dbag.setdefault('eth' + str(nic_dev_id), []).append(ip)
+        if 'source_nat' in ip and ip['source_nat'] and ip['device'] in dbag and len(dbag[ip['device']]) > 0:
+            dbag[ip['device']].insert(0, ip) # make sure the source_nat ip is first (primary) on the device
+        else:
+            dbag.setdefault(ip['device'], []).append(ip)
 
     return dbag

@@ -18,7 +18,7 @@ sudo: required
 dist: trusty
 language: java
 jdk:
-- oraclejdk7
+- oraclejdk8
 python:
   - "2.7"
 cache:
@@ -48,6 +48,7 @@ env:
              smoke/test_list_ids_parameter
              smoke/test_loadbalance
              smoke/test_login
+             smoke/test_metrics_api
              smoke/test_multipleips_per_nic
              smoke/test_network
              smoke/test_network_acl
